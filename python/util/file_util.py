@@ -11,3 +11,6 @@ def temp_path():
 def delete_file(filePath):
     if os.path.exists(filePath):
         os.remove(filePath)
+
+def open_folder(path):
+    os.startfile(path)

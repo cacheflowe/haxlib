@@ -35,8 +35,10 @@ A personal toolkit & demo playground
   - shell env vars
   - Launch app w/shell script, reliably
 - External python modules - now w/ pyEnvManager
+- Autosave w/dirty tox detection
 - AppStore (w/socket server) - look at Zoox example
   - Store paths to shared nodes
+- Refactoring
 - Probably not for today
   - ML tools in TD
   - Threading
@@ -455,16 +457,15 @@ module_path = os.path.join(project.folder, 'python', 'test_import')
 # check path for new module_path in os.path
 # and check if the module path is already in sys.path and that it's a valid location
 if module_path not in sys.path:
-  if os.path.exists(module_path):
-    # If not, add it to sys.path
+  if os.path.exists(module_path): # If not, add it to sys.path
     sys.path.insert(0, module_path)  # Add to the beginning of the path list
-    print("Python path updated:")
     # print paths as bulletpoints
+    print("Python path updated:")
     for path in sys.path:
-      print(" -", path)
+      print("- ", path)
 
 # Now you can import from test_external.py
-# Reload the module in case it's code has changed. It seems to get cached when imported
+# Reload the module in case it's code has changed. It gets cached when imported. You can remove importlib once stable.
 import test_external
 importlib.reload(test_external)
 
@@ -574,7 +575,7 @@ class NewExtension:
 	def __init__(self, ownerComp):
 		self.ownerComp = ownerComp
 		# Create dependable properties that reset when extension is saved
-		TDF.createProperty(self, 'MyProp1', value=3, dependable=True) 
+		TDF.createProperty(self, 'MyProp1', value=3, dependable=True, readOnly=False) 
 		self.MyProp2 = tdu.Dependency(3)
 
 		# Example update different dependable props:
@@ -583,8 +584,9 @@ class NewExtension:
 
 		# Create dependables with StorageManager, which persist between saves
 		self.stored = StorageManager(self, ownerComp, [
-			{'name': 'ExampleProp', 'default': None, 'readOnly': False, 'property': True, 'dependable': True},
+			{'name': 'ExampleProp', 'default': 13, 'readOnly': False, 'property': True, 'dependable': True},
 		])
+		self.ExampleProp = 14
 
 	def Reset(self):
 		return
@@ -613,4 +615,36 @@ class NewExtension:
 		print('[NewExtension] Cleaning up')
 		# self.stored.clear() # Uncomment to reset stored values
 
+```
+
+
+## Run a shell script on a thread
+
+```python
+# https://docs.python.org/3/library/subprocess.html#subprocess.Popen
+
+import threading
+import subprocess
+from subprocess import Popen, PIPE, STDOUT
+import system_util
+
+def run_script():
+    # Start the subprocess and specify stdout and stderr to be piped
+    p = Popen(['serve-all.cmd'], cwd='www\\scripts', stdout=PIPE, stderr=STDOUT, shell=True, text=True, bufsize=1)
+
+    # Use a loop to read the output line by line as it becomes available
+    for line in p.stdout:
+      print(line, end='')  # Print each line of the output
+
+    p.stdout.close()  # Close the stdout stream
+    p.wait()  # Wait for the subprocess to exit
+
+# Create and start a thread to run the run_script function
+thread = threading.Thread(target=run_script)
+thread.start()
+
+# open a browser window at current ip address
+# get ip address
+ipAddr = system_util.get_ip_address()
+system_util.open_url("http://" + ipAddr + ":5173/app-store-distributed/index.html")
 ```
