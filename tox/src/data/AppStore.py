@@ -1,343 +1,361 @@
 import json
+import threading
 import time
 import uuid
-
-import threading
-import subprocess
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import PIPE, STDOUT, Popen
+from typing import Any, Callable, Dict, List, Optional, Union
 
 
 class AppStore:
 	"""
-	AppStore description
+	Global state management extension for TouchDesigner.
+
+	Provides a centralized key-value store with type-aware getters/setters,
+	WebSocket synchronization, and Python callback listeners.
 	"""
-	def __init__(self, ownerComp):
-		# The component to which this extension is attached
-		self.ownerComp = ownerComp
+
+	# Value type constants
+	TYPE_NUMBER = 'number'
+	TYPE_STRING = 'string'
+	TYPE_BOOLEAN = 'boolean'
+
+	def __init__(self, ownerComp: baseCOMP) -> None:
+		self.ownerComp: baseCOMP = ownerComp
+		self.initListeners()
 		self.initStore()
 		self.initWebSocket()
-		# python callbacks. there's some funkiness with cleanup that should be explored more
-		self.listeners = []
-		self.listenersByKey = {}
 
-	def initStore(self):
-		self.storeTable = op('table_store_dictionary')
-		self.numericTable = op('datto_store_numbers')
-		self.fileInTable = op('filein_backup')
-		self.defaultsTable = op('in_default_values')
-		return
-	
-	def getSenderId(self):
+	def initListeners(self) -> None:
+		self.listeners: List[Any] = []
+		self.listenersByKey: Dict[str, List[Any]] = {}
+
+	def initStore(self) -> None:
+		"""Initialize internal operator references."""
+		self.storeTable: tableDAT = self.ownerComp.op('table_store_dictionary')
+		self.numericTable: dattoCHOP = self.ownerComp.op('datto_store_numbers')
+		self.fileInTable: tableDAT = self.ownerComp.op('filein_backup')
+		self.defaultsTable: tableDAT = self.ownerComp.op('in_default_values')
+
+	def getSenderId(self) -> str:
+		"""Get the sender ID from component parameters."""
 		return self.ownerComp.par.Senderid.eval()
 
-	################################################### 
-	# select node reference helpers
-	################################################### 
+	###################################################
+	# Node Reference Helpers
+	###################################################
 
-	def GetStoreDat(self):
+	def GetStoreDat(self) -> 'DAT':
+		"""Get the store table DAT operator."""
 		return self.storeTable
-	
-	def GetStoreChop(self):
+
+	def GetStoreChop(self) -> 'CHOP':
+		"""Get the numeric store CHOP operator."""
 		return self.numericTable
-	
-	################################################### 
+
+	###################################################
 	# Getters
-	################################################### 
+	###################################################
 
-	def HasValue(self, key):
-		foundRow = self.storeTable.row(key)
-		return foundRow != None
+	def HasValue(self, key: str) -> bool:
+		"""Check if a key exists in the store."""
+		return self.storeTable.row(key) is not None
 
-	def GetFloat(self, key, default=0.0):
-		if self.numericTable[key] != None:
+	def GetFloat(self, key: str, default: float = 0.0) -> float:
+		"""Get a numeric value from the store."""
+		if self.numericTable[key] is not None:
 			return float(self.numericTable[key])
-		else:
-			return default
-	
-	def GetString(self, key, default=''):
-		foundRow = self.storeTable.row(key)
-		if foundRow != None:
-			return self.storeTable[key, 1].val
-		else:
-			return default
-		
-	def GetBoolean(self, key, default=False):
-		foundRow = self.storeTable.row(key)
-		if foundRow != None:
-			return True if self.storeTable[key, 1].val.lower() == 'true' else False
-		else:
-			return default
-	
-	################################################### 
-	# Setters
-	################################################### 
+		return default
 
-	def SetValue(self, key, value, type=None, sender=None, broadcast=False):
+	def GetString(self, key: str, default: str = '') -> str:
+		"""Get a string value from the store."""
+		if self.storeTable.row(key) is not None:
+			return self.storeTable[key, 1].val
+		return default
+
+	def GetBoolean(self, key: str, default: bool = False) -> bool:
+		"""Get a boolean value from the store."""
+		if self.storeTable.row(key) is not None:
+			return self.storeTable[key, 1].val.lower() == 'true'
+		return default
+
+	###################################################
+	# Setters
+	###################################################
+
+	def SetValue(self, key: str, value: Any, valueType: Optional[str] = None, sender: Optional[str] = None, broadcast: bool = False) -> None:
+		"""Set a value in the store with optional broadcasting."""
 		if broadcast:
-			self.broadcastValue(key, value, type)
+			self.broadcastValue(key, value, valueType)
 		else:
-			eventId = self.NewEventId()
-			foundRow = self.storeTable.row(key)
-			if foundRow != None:
+			eventId = self.newEventId()
+			if self.storeTable.row(key) is not None:
 				self.storeTable[key, 1] = value
-				self.storeTable[key, 2] = type
+				self.storeTable[key, 2] = valueType
 				self.storeTable[key, 3] = sender or ''
 				self.storeTable[key, 4] = eventId
 			else:
-				self.storeTable.appendRow([key, value, type, sender, eventId])
-			# Notify listeners of the change
-			self.NotifyListeners(key, value, type) 
-		return
-	
-	def SetFloat(self, key, value, broadcast=False):
-		self.SetValue(key, value, 'number', self.getSenderId(), broadcast)
-		return
-	
-	def SetString(self, key, value, broadcast=False):
-		self.SetValue(key, value, 'string', self.getSenderId(), broadcast)
-		return
-	
-	def SetBoolean(self, key, value, broadcast=False):
-		self.SetValue(key, value, 'boolean', self.getSenderId(), broadcast)
-		return
-	
-	def broadcastValue(self, key, value, type):
-		jsonOut = {}
-		jsonOut['store'] = True
-		jsonOut['key'] = key
-		jsonOut['value'] = value
-		jsonOut['type'] = type
-		if self.getSenderId() != '':
-			jsonOut['sender'] = self.getSenderId()
-		op('websocket1').sendText(json.dumps(jsonOut))
-	
-	################################################### 
-	# Event listener functions for Python extension use only
-	################################################### 
-	
-	def AddListener(self, listener, key=None):
-		# listen to all events if no key is specified
-		if key == None:
+				self.storeTable.appendRow(
+					[key, value, valueType, sender, eventId])
+			self.NotifyListeners(key, value, valueType)
+
+	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:
+		"""Set a numeric value in the store."""
+		self.SetValue(key, value, self.TYPE_NUMBER,
+					self.getSenderId(), broadcast)
+
+	def SetString(self, key: str, value: str, broadcast: bool = False) -> None:
+		"""Set a string value in the store."""
+		self.SetValue(key, value, self.TYPE_STRING,
+					self.getSenderId(), broadcast)
+
+	def SetBoolean(self, key: str, value: bool, broadcast: bool = False) -> None:
+		"""Set a boolean value in the store."""
+		self.SetValue(key, value, self.TYPE_BOOLEAN,
+					self.getSenderId(), broadcast)
+
+	def broadcastValue(self, key: str, value: Any, valueType: Optional[str]) -> None:
+		"""Broadcast a value change over WebSocket."""
+		jsonOut = {
+			'store': True,
+			'key': key,
+			'value': value,
+			'type': valueType
+		}
+		senderId = self.getSenderId()
+		if senderId:
+			jsonOut['sender'] = senderId
+		self.ownerComp.op('websocket1').sendText(json.dumps(jsonOut))
+
+	###################################################
+	# Event Listeners
+	###################################################
+
+	def AddListener(self, listener: Any, key: Optional[str] = None) -> None:
+		"""
+		Add a listener for store value changes.
+
+		Args:
+				listener: Object with OnAppStoreValueChanged method or On_{key} method
+				key: Optional specific key to listen for. If None, listens to all changes.
+		"""
+		if key is None:
 			if listener not in self.listeners:
 				self.listeners.append(listener)
 				print(f"[AppStore] Added listener for *: {listener}")
-				# listen to specific key events and call a function of that name, prefixed with 'On_'
-		elif key != None and hasattr(listener, f'On_{key}'):
-				keyListeners = self.listenersByKey.setdefault(key, [])
-				if listener not in keyListeners:
-						print(f"[AppStore] Adding listener for key '{key}': {listener}")
-						keyListeners.append(listener)
+		elif hasattr(listener, f'On_{key}'):
+			keyListeners = self.listenersByKey.setdefault(key, [])
+			if listener not in keyListeners:
+				print(
+					f"[AppStore] Adding listener for key '{key}': {listener}")
+				keyListeners.append(listener)
 		else:
-				print(f"[AppStore] Listener already exists: {listener}")
-		
-		# Clean up any duplicate extensions as they were saved
-		# When an extension is saved, it may create a dereferenced instance of itself
-		self.CleanupDefunctListeners()
+			print(f"[AppStore] Listener already exists: {listener}")
 
-	def RemoveListener(self, listener):
-		# remove listener from both the general list and the specific key list
+		self.cleanupDefunctListeners()
+
+	def RemoveListener(self, listener: Any) -> None:
+		"""Remove a listener from all subscriptions."""
 		removed = False
 		if listener in self.listeners:
 			self.listeners.remove(listener)
-			# print(f"[AppStore] RemoveListener() - Removed listener: {listener}")
 			removed = True
-		# remove from specific key listeners
 		for key, listeners in self.listenersByKey.items():
 			if listener in listeners:
 				listeners.remove(listener)
-				# print(f"[AppStore] RemoveListener() - Removed listener for key '{key}': {listener}")
 				removed = True
-		if not removed:	
-			print(f"[AppStore] RemoveListener() - Listener not found: {listener}")
+		if not removed:
+			print(
+				f"[AppStore] RemoveListener() - Listener not found: {listener}")
 
-	def NotifyListeners(self, key, value, type):
+	def NotifyListeners(self, key: str, value: Any, valueType: Optional[str]) -> None:
+		"""Notify all relevant listeners of a value change."""
 		for listener in self.listeners:
 			if hasattr(listener, 'OnAppStoreValueChanged'):
-				listener.OnAppStoreValueChanged(key, value, type)
+				listener.OnAppStoreValueChanged(key, value, valueType)
 			else:
-				print(f"[AppStore] Listener {listener} does not have OnAppStoreValueChanged method")
+				print(
+					f"[AppStore] Listener {listener} does not have OnAppStoreValueChanged method")
+
 		for listener in self.listenersByKey.get(key, []):
-			callback_fn = f'On_{key}'
-			if hasattr(listener, callback_fn):
-				getattr(listener, callback_fn)(key, value, type)
-				# print(f"[AppStore] Notified listener {listener} for key '{key}': {value} (type: {type})")
+			callbackFn = f'On_{key}'
+			if hasattr(listener, callbackFn):
+				getattr(listener, callbackFn)(key, value, valueType)
 			else:
-				print(f"[AppStore] Listener {listener} does not have {callback_fn} method for key: {key}")
-		# print(f"[AppStore] Notified {len(self.listeners)} listeners for key: {key}, value: {value}, type: {type}")
+				print(
+					f"[AppStore] Listener {listener} does not have {callbackFn} method for key: {key}")
 
+	def cleanupDefunctListeners(self) -> None:
+		"""Remove old instances of listeners, keeping only the newest instance per ownerComp."""
+		delCount = 0
+		ownerCompToListener: Dict[Any, Any] = {}
 
-	def CleanupDefunctListeners(self):
-			"""Remove old instances of listeners, keeping only the newest instance per ownerComp"""
-			# Track the most recent listener for each ownerComp
-			delCount = 0
-			ownerComp_to_listener = {}
-			
-			# First pass: find the most recent listener for each ownerComp
-			for listener in self.listeners:
+		for listener in self.listeners:
+			if hasattr(listener, 'ownerComp'):
+				ownerCompToListener[listener.ownerComp] = listener
+
+		for i in range(len(self.listeners) - 1, -1, -1):
+			listener = self.listeners[i]
+			if hasattr(listener, 'ownerComp'):
+				if ownerCompToListener[listener.ownerComp] is not listener:
+					del self.listeners[i]
+					delCount += 1
+					print(
+						f"[AppStore] Removed old listener instance: {listener}")
+
+		for key in list(self.listenersByKey.keys()):
+			listeners = self.listenersByKey[key]
+			ownerCompToListener = {}
+
+			for listener in listeners:
 				if hasattr(listener, 'ownerComp'):
-					ownerComp_to_listener[listener.ownerComp] = listener
-			
-			# Second pass: remove old instances
-			for i in range(len(self.listeners) - 1, -1, -1):
-				listener = self.listeners[i]
+					ownerCompToListener[listener.ownerComp] = listener
+
+			for i in range(len(listeners) - 1, -1, -1):
+				listener = listeners[i]
 				if hasattr(listener, 'ownerComp'):
-					# If this listener is not the most recent for its ownerComp, remove it
-					if ownerComp_to_listener[listener.ownerComp] is not listener:
-						del self.listeners[i]
+					if ownerCompToListener[listener.ownerComp] is not listener:
+						del listeners[i]
 						delCount += 1
-						print(f"[AppStore] Removed old listener instance: {listener}")
-			
-			# Clean up key-specific listeners the same way
-			for key in list(self.listenersByKey.keys()):
-				listeners = self.listenersByKey[key]
-				ownerComp_to_listener = {}
-				
-				# Find most recent listener for each ownerComp
-				for listener in listeners:
-					if hasattr(listener, 'ownerComp'):
-						ownerComp_to_listener[listener.ownerComp] = listener
-				
-				# Remove old instances
-				for i in range(len(listeners) - 1, -1, -1):
-					listener = listeners[i]
-					if hasattr(listener, 'ownerComp'):
-						if ownerComp_to_listener[listener.ownerComp] is not listener:
-							del listeners[i]
-							delCount += 1
-							print(f"[AppStore] Removed old listener instance for key '{key}': {listener}")
-				
-				# Remove empty key entries
-				if not listeners:
-					del self.listenersByKey[key]
+						print(
+							f"[AppStore] Removed old listener instance for key '{key}': {listener}")
 
-				if delCount > 0:
-						print(f"[AppStore] CleanupDefunctListeners() - Removed {delCount} defunct listeners")
+			if not listeners:
+				del self.listenersByKey[key]
 
-	################################################### 
-	# Util
-	################################################### 
-	
-	def ClearData(self):
+		if delCount > 0:
+			print(f"[AppStore] Cleaned up {delCount} defunct listeners")
+
+	###################################################
+	# Utility
+	###################################################
+
+	def ClearData(self) -> None:
+		"""Clear all data from the store."""
 		self.storeTable.clear()
 
-	def RemoveValue(self, key, broadcast=False):
-		foundRow = self.storeTable.row(key)
-		if foundRow != None:
+	def RemoveValue(self, key: str, broadcast: bool = False) -> None:
+		"""Remove a value from the store."""
+		if self.storeTable.row(key) is not None:
+			valueType = self.storeTable[key, 2].val
 			self.storeTable.deleteRow(key)
 			if broadcast:
-				type = self.storeTable[key, 2] = type
-				self.broadcastValue(key, None, type)
-		return
+				self.broadcastValue(key, None, valueType)
 
-	def NewEventId(self):
-		return str(time.time()) + '-' + str(uuid.uuid4())
+	def newEventId(self) -> str:
+		"""Generate a unique event ID."""
+		return f"{time.time()}-{uuid.uuid4()}"
 
-	################################################### 
-	# WebSocket connection
-	################################################### 
+	###################################################
+	# WebSocket Connection
+	###################################################
 
-	def initWebSocket(self):
-		self.setIsConnected(0)
+	def initWebSocket(self) -> None:
+		"""Initialize WebSocket connection state."""
+		self.setIsConnected(False)
 		self.setColor(1, 1, 0)
 		self.CheckSocketReconnect()
-		return
-	
-	# if state is 0, allow button-click to run shell script
-	def StartWebServer(self):
-		if self.IsConnected() == False:
+
+	def StartWebServer(self) -> None:
+		"""Start the web server if not already connected."""
+		if not self.IsConnected():
 			print('[AppStore] Starting web server shell script...')
-			thread = threading.Thread(target=self.StartWebServerThread)
+			thread = threading.Thread(target=self.startWebServerThread)
 			thread.start()
 		else:
 			print('[AppStore] Web server already running, skipping shell script')
-		return
 
-	def StartWebServerThread(self):
-		# Start the subprocess and specify stdout and stderr to be piped
-		p = Popen(['web-server-start.cmd'], cwd='scripts', stdout=PIPE, stderr=STDOUT, shell=True, text=True, bufsize=1)
-
-		# Use a loop to read the output line by line as it becomes available
+	def startWebServerThread(self) -> None:
+		"""Background thread to run the web server process."""
+		p = Popen(
+			['web-server-start.cmd'],
+			cwd='scripts',
+			stdout=PIPE,
+			stderr=STDOUT,
+			shell=True,
+			text=True,
+			bufsize=1
+		)
 		for line in p.stdout:
-			print(line, end='')  # Print each line of the output
+			print(line, end='')
+		p.stdout.close()
+		p.wait()
 
-		p.stdout.close()  # Close the stdout stream
-		p.wait()  # Wait for the subprocess to exit
-		return
-	
-	def OpenWebBrowser(self):
+	def OpenWebBrowser(self) -> None:
+		"""Open the web browser to the app URL."""
 		print('[AppStore] OpenWebBrowser() does nothing right now')
-		# ipAddr = op.SystemUtil.GetIpAddress()
-		# op.SystemUtil.OpenURL("http://" + ipAddr + ":5173/") # app-store-distributed/index.html
-	
-	def setIsConnected(self, state):
-		op('constant_active').par.value0 = state
-		return
-	
-	def IsConnected(self):
-		return op('constant_active').par.value0 == 1
 
-	def CheckSocketReconnect(self):
-		if self.IsConnected() == False:
-			op('websocket1').par.active = 1
-			op('websocket1').par.reset.pulse()
-		return
-	
-	def SocketConnected(self, websocketDat):
-		self.setIsConnected(1)
+	def setIsConnected(self, state: bool) -> None:
+		"""Set the WebSocket connection state."""
+		self.ownerComp.op('constant_active').par.value0 = 1 if state else 0
+
+	def IsConnected(self) -> bool:
+		"""Check if WebSocket is connected."""
+		return self.ownerComp.op('constant_active').par.value0 == 1
+
+	def CheckSocketReconnect(self) -> None:
+		"""Attempt to reconnect the WebSocket if disconnected."""
+		if not self.IsConnected():
+			websocket = self.ownerComp.op('websocket1')
+			websocket.par.active = 1
+			websocket.par.reset.pulse()
+
+	def SocketConnected(self, websocketDat: websocketDAT) -> None:
+		"""Handle WebSocket connection event."""
+		self.setIsConnected(True)
 		self.setColor(0, 1, 0)
-	
-	def SocketDisconnected(self, websocketDat):
-		self.setIsConnected(0)
+
+	def SocketDisconnected(self, websocketDat: websocketDAT) -> None:
+		"""Handle WebSocket disconnection event."""
+		self.setIsConnected(False)
 		self.setColor(1, 1, 0)
 
-	def MessageReceived(self, dat, rowIndex, message):
-		# parse json as dictionary
+	def MessageReceived(self, dat: tableDAT, rowIndex: int, message: str) -> None:
+		"""Handle incoming WebSocket message."""
 		data = json.loads(message)
 
-		# check for AppStoreDistributed message
-		if('store' in data and data['store'] == True):
-			# get key and value from AppStoreDistributed message
-			# and intsert it into the storeTable
+		if data.get('store') == True:
 			key = data['key']
 			value = data['value']
-			type = data['type']
-			sender = data['sender'] if 'sender' in data else '' #handle missing data
-			self.SetValue(key, value, type, sender, False)
+			valueType = data['type']
+			sender = data.get('sender', '')
+			self.SetValue(key, value, valueType, sender, False)
 		else:
-			print('Generic json message received')
-		return
+			print('[AppStore] Generic json message received')
 
-	################################################### 
-	# Handle client connection
-	################################################### 
-	
-	def HandleClientConnected(self):
-		# run(lambda: self.BroadcastVals(), delayFrames=30) # frame delay to give the web app a moment to init
-		return
-	
-	def BroadcastVals(self):
-		# read list of keys from component, split on space, and loop through store, checking data type and broadcasting each value
+	###################################################
+	# Client Connection
+	###################################################
+
+	def HandleClientConnected(self) -> None:
+		"""Handle new client connection event."""
+		pass
+
+	def BroadcastVals(self) -> None:
+		"""Broadcast specified values to connected clients."""
 		keys = self.ownerComp.par.Clientconnectedkeys.eval().split(' ')
 		for key in keys:
-			foundRow = self.storeTable.row(key)
-			if foundRow != None:
+			if self.storeTable.row(key) is not None:
 				value = self.storeTable[key, 1]
-				type = self.storeTable[key, 2].val
-				if type == 'number':
+				valueType = self.storeTable[key, 2].val
+				if valueType == self.TYPE_NUMBER:
 					self.SetFloat(key, float(value), True)
-				elif type == 'string':
+				elif valueType == self.TYPE_STRING:
 					self.SetString(key, value.val, True)
-				elif type == 'boolean':
-					value = True if value.val.lower() == 'true' else False
-					self.SetBoolean(key, value, True)
-		
-		return
+				elif valueType == self.TYPE_BOOLEAN:
+					boolValue = value.val.lower() == 'true'
+					self.SetBoolean(key, boolValue, True)
 
-	################################################### 
-	# Defaults input table
-	################################################### 
+	###################################################
+	# Defaults
+	###################################################
 
-	def SetDefaults(self, force=False):
+	def SetDefaults(self, force: bool = False) -> None:
+		"""
+		Set default values from the defaults table.
+
+		Args:
+				force: If True, overwrite existing values
+		"""
 		print('[AppStore] SetDefaults')
 		if self.defaultsTable.numRows == 0:
 			print('[AppStore] No defaults to set')
@@ -345,47 +363,46 @@ class AppStore:
 		for row in self.defaultsTable.rows():
 			key = row[0].val
 			value = row[1].val
-			type = row[2].val
-			if len(key) > 0 and len(value) > 0 and len(type) > 0: # check for empty values before applying onTableChange
-				if self.HasValue(key) == False or force: # only set defaults if the key doesn't exist or force is True
-					self.SetValue(key, value, type, self.getSenderId(), False)
-		return
+			valueType = row[2].val
+			if key and value and valueType:
+				if not self.HasValue(key) or force:
+					self.SetValue(key, value, valueType,
+								self.getSenderId(), False)
 
-	################################################### 
-	# File save/load
-	################################################### 
+	###################################################
+	# File Save/Load
+	###################################################
 
-	def SaveFile(self):
+	def SaveFile(self) -> None:
+		"""Save the store to a backup file."""
 		filePath = self.ownerComp.par.Backupfile.eval()
-		if filePath != '':
-			print('[AppStore] SaveFile: ' + filePath)
-			self.storeTable.save(filePath, createFolders=True) # save tsv to disk
-		return
-	
-	def LoadFile(self):
-		filePath = self.ownerComp.par.Backupfile.eval()
-		if filePath != '':
-			print('[AppStore] LoadFile: ' + filePath)
-			self.fileInTable.par.refreshpulse.pulse() # refresh file from disk
-			self.storeTable.copy(self.fileInTable) # copy table over main store table
-		return
+		if filePath:
+			print(f'[AppStore] SaveFile: {filePath}')
+			self.storeTable.save(filePath, createFolders=True)
 
-	################################################### 
+	def LoadFile(self) -> None:
+		"""Load the store from a backup file."""
+		filePath = self.ownerComp.par.Backupfile.eval()
+		if filePath:
+			print(f'[AppStore] LoadFile: {filePath}')
+			self.fileInTable.par.refreshpulse.pulse()
+			self.storeTable.copy(self.fileInTable)
+
+	###################################################
 	# Debug
-	################################################### 
+	###################################################
 
-	def PrintValues(self):
+	def PrintValues(self) -> None:
+		"""Print all values in the store for debugging."""
 		print('=== AppStore values: ===')
 		for row in self.storeTable.rows():
-			print(row[0] + ': ' + row[1] + ' (' + row[2] + ')')
+			print(f"{row[0]}: {row[1]} ({row[2]})")
 		print('========================')
-		return
 
-	def setColor(self, r, g, b):
-		opColorIndicator = op('constant_active_color')
-		opColorIndicator.par.colorr = r
-		opColorIndicator.par.colorg = g
-		opColorIndicator.par.colorb = b
+	def setColor(self, r: float, g: float, b: float) -> None:
+		"""Set the component color indicator."""
+		colorIndicator = self.ownerComp.op('constant_active_color')
+		colorIndicator.par.colorr = r
+		colorIndicator.par.colorg = g
+		colorIndicator.par.colorb = b
 		self.ownerComp.color = (r, g, b)
-		return
-

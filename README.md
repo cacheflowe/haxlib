@@ -97,11 +97,6 @@ vec2 p = (vUV.st - vec2(0.5)) / aspect;
 [run()](https://derivative.ca/UserGuide/Run_Command_Examples)
 
 ```python
-# Call a class function with a delay in an extension
-run(lambda: self.BroadcastVals(), delayFrames=30)
-run(self.BroadcastVals, delayFrames=30)
-run('self.BroadcastVals(args)', delayFrames=30)
-run( "args[0]()", lambda: self.update_par("dos"), delayFrames = 200 )  # https://forum.derivative.ca/t/using-run-to-delay-python-code-2022-12-11-15-37/306405/2
 # Call a global function with a delay
 run("broadcastVals()", delayFrames=30)
 # Call a function with an argument
@@ -114,6 +109,10 @@ op('text_script_example').run('arg1=something', delayFrames=30)
 run() w/delay from extension
 
 ```python
+run(lambda: self.BroadcastVals(), delayMilliseconds=100)
+run(self.BroadcastVals, delayFrames=30)
+run('self.BroadcastVals(args)', delayFrames=30)
+run( "args[0]()", lambda: self.update_par("dos"), delayFrames = 200 )  # https://forum.derivative.ca/t/using-run-to-delay-python-code-2022-12-11-15-37/306405/2
 run("parent().SampleTriggerOff()", fromOP=me, delayFrames=1)
 run(f"op('{self.ownerComp.path}').PulseTriggerLaunch()", delayFrames=delayFrames)
 ```
@@ -201,6 +200,8 @@ f'{variable:05.2f}' # 5 total spaces, 2 decimal places
 ```
 
 ## Advanced python coding in TD
+Pattern matching
+- https://docs.derivative.ca/Pattern_Matching
 
 Native TD
 - Python Extensions
@@ -211,6 +212,19 @@ Subprocess:
 - https://matthewragan.com/2019/08/14/touchdesigner-python-and-the-subprocess-module/
 Windows extensions:
 - https://github.com/mhammond/pywin32
+
+Internal python modules for TD:
+- https://docs.derivative.ca/MOD_Class
+
+Example import of a Text DAT (named `onnx_util`) as a module, 4 equivalent ways:
+```python
+import onnx_util 
+onnx_util = mod.onnx_util
+onnx_util = mod('onnx_util') # this can be a path too
+onnx_util = mod(f'{op.PyUtils}/onnx_util') # with a global op ref
+onnx_util = op.PyUtils.Get('onnx_util') # need to reimport if source changes
+ONNXInferenceManager = mod(f'{op.PyUtils}/onnx_inference_manager').ONNXInferenceManager # grab a class from the module
+```
 
 External module support (NEW)
 - tdPyEnvManager:
@@ -293,6 +307,28 @@ Classes of interest
 - https://derivative.ca/UserGuide/App_Class
 - https://derivative.ca/UserGuide/Color_Class
 
+TD install locations of importance: 
+- TouchDesigner.2025.32050\bin\Lib\tdi
+- TouchDesigner.2025.32050\bin\Lib\tdutils
+- TouchDesigner.2025.32050\Samples\Learn\OfflineHelp\https.docs.derivative.ca
+- TouchDesigner.2025.32050\Samples\Learn\OPSnippets\Snippets
+
+## OOP in TD
+
+- Base Comp or Container is a class
+	- Customize w/parameters
+	- Parexec
+	- op()/ops() - query nodes like document.querySelector() in .js
+	- Global op references are singletons or clone masters. Should only be at top level
+- Cloning & replicators
+	- Replilcator is like a for() loop that creates a bunch of objects from a class definition
+	- Clones are like instances of a class, generally sprinkled throughout a project
+- Externalizing .tox & .py files 
+	- for git tracking & easy access in VS Code
+	- externalized python is one step closer to normal AI-assisted dev workflows
+	- Comp + .py extension = class
+  	- python relative external file path to tox: `parent().par.externaltox.eval().replace('.tox', '.py')`
+
 ## ML in TD
 
 Cuda versions for TD versions
@@ -313,6 +349,7 @@ Pytorch:
   - What about a command like this? borrowed from facefusion
     - conda install conda-forge::cuda-runtime=12.8.0 conda-forge::cudnn=9.7.1.26
 - Check these projects for torch example: 
+  - https://github.com/TouchDesigner/TDDepthAnything
   - https://github.com/olegchomp/TDDepthAnything
   - https://github.com/patrickhartono/TDYolo
   - Related: https://huggingface.co/spaces/Xenova/webgpu-realtime-depth-estimation
@@ -361,6 +398,22 @@ ONNX:
 	- SAM2
   	- https://github.com/ibaiGorordo/ONNX-SAM2-Segment-Anything
 	- Alt pose estimation: https://github.com/Tau-J/rtmlib
+- [bgnet segmentation](https://aihub.qualcomm.com/models/bgnet)
+- [cavaface face analysis](https://aihub.qualcomm.com/models/cavaface)
+- [controlnet-canny](https://aihub.qualcomm.com/models/controlnet_canny)
+- [depth_anything_v2](https://aihub.qualcomm.com/models/depth_anything_v2)
+- [easyocr - OCR](https://aihub.qualcomm.com/models/easyocr)
+  - https://huggingface.co/monkt/paddleocr-onnx/tree/main
+- [eyegaze](https://aihub.qualcomm.com/models/eyegaze)
+- [foot_track_net - foot detection](https://aihub.qualcomm.com/models/foot_track_net)
+- [lama_dilated - image inpainting](https://aihub.qualcomm.com/models/lama_dilated)
+- [mediapipe_selfie - segmentation](https://aihub.qualcomm.com/models/mediapipe_selfie)
+- PINTO!
+  - https://github.com/PINTO0309/PINTO_model_zoo/tree/main/472_DEIMv2-Wholebody34
+  - https://github.com/PINTO0309/PINTO_model_zoo/tree/main/333_E2Pose/demo
+  - https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose
+    - https://huggingface.co/qualcomm/RTMPose-Body2d/tree/main
+  - https://github.com/PINTO0309/PINTO_model_zoo/tree/main/322_YOLOv7_Head
 
 ## Local modules
 
@@ -527,6 +580,17 @@ for detection in detection_result.detections:
 for i, detection in enumerate(detection_result.detections):
 for i in range(min(maxResults, len(detection_result.detections))):
 for i, c in enumerate(newOps): # replicator
+for row in range(self.opDataHistoryDAT.numRows - 1, -1, -1): # loop backwards!
+```
+
+## Date/time
+
+```python
+from datetime import datetime
+
+current_time = datetime.now()
+formatted_time = current_time.strftime('%Y-%m-%d %H:%M:%S')
+print("Current Date and Time:", formatted_time)
 ```
 
 ## Concat a table DAT into a single line
@@ -573,7 +637,7 @@ class NewExtension:
 	"""
 
 	def __init__(self, ownerComp):
-		self.ownerComp = ownerComp
+		self.ownerComp:baseCOMP = ownerComp
 		# Create dependable properties that reset when extension is saved
 		TDF.createProperty(self, 'MyProp1', value=3, dependable=True, readOnly=False) 
 		self.MyProp2 = tdu.Dependency(3)
@@ -587,6 +651,10 @@ class NewExtension:
 			{'name': 'ExampleProp', 'default': 13, 'readOnly': False, 'property': True, 'dependable': True},
 		])
 		self.ExampleProp = 14
+	
+	def onInitTD(self):
+		# Called after the extension is fully initialized and attached to the component
+		debug("onInitTD called") 
 
 	def Reset(self):
 		return
@@ -612,7 +680,7 @@ class NewExtension:
 		return
 		
 	def dispose(self):
-		print('[NewExtension] Cleaning up')
+		debug('[NewExtension] Cleaning up')
 		# self.stored.clear() # Uncomment to reset stored values
 
 ```

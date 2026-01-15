@@ -11,19 +11,19 @@
   * Network nav: I (in), U (up), H (home)  
   * TAB  
   * Parameter window: P to toggle  
-  * Shift \+ C for a comment\!  
-  * ALT \+ S for project search  
-  * ALT \+ S for floating textport window  
+  * Shift + C for a comment\!  
+  * ALT + S for project search  
+  * ALT + S for floating textport window  
 * Python snips  
   * Set a node’s parameter:  
-    **op(‘noise1’).par.period \= 1**  
+    **op(‘noise1’).par.period = 1**  
   * Get a node’s parameter (numeric)  
     **op.par.Smoothrange.eval()**  
     **me.parent().par.Smoothrange.eval()**  
   * Get the first input of an op (useful when reading data)  
-    **op.inputs\[0\]**  
+    **op.inputs[0]**  
   * Make a connection between nodes  
-    **op.outputConnectors\[0\].connect(op2)**  
+    **op.outputConnectors[0].connect(op2)**  
     Loop through replicants with index  
     **for i, c in enumerate(newOps):**  
   * Use the size of parent Container to scale a UI element  
@@ -37,10 +37,10 @@
   * hover, then click & hold to get different drag scales, then drag left/right while still holding  
   * click "I" for the node's info window  
   * click "?" for help info. 2nd "?" is python help  
-  * ALT \+ mouse hover to get a parameter tip  
+  * ALT + mouse hover to get a parameter tip  
 * Panes  
-  * ALT \+ Z \- close pane w/mouse inside  
-  * ALT \+ \[ or \] \- split cur pane  
+  * ALT + Z - close pane w/mouse inside  
+  * ALT + [ or ] - split cur pane  
 * Locations (secret)  
   * /sys  
   * /ui  
@@ -49,7 +49,7 @@
   * Darker options are "generators"  
 * Network tricks  
   * Select multiple items to change parameters on all  
-  * ALT \+ N to add a null after the selected TOP  
+  * ALT + N to add a null after the selected TOP  
 * Create a BaseComp component  
   * Create multiple nodes, right-click network background, and do Collapse Selected, add null at the end for output  
   * Create Select node outside of the base component, split pane, and drag entire null TOP over to Select’s Parameter window as the source TOP  
@@ -66,9 +66,9 @@
 * Feedback  
   * Need to change Comp order  
 * Compositing  
-  * Constant TOP \- use this with rgba(0,0,0,0) to create a specific-sized FBO for compositing  
+  * Constant TOP - use this with rgba(0,0,0,0) to create a specific-sized FBO for compositing  
   * Order in composite TOPs like Over depend on the order of inputs  
-  * Use multiple Over TOPs to add multiple graphics to a composite \- this lets you treat each new additional texture with its own parameters, which will probably be different from each other  
+  * Use multiple Over TOPs to add multiple graphics to a composite - this lets you treat each new additional texture with its own parameters, which will probably be different from each other  
   * Blend modes:   
     * In Palette, “blendModes” example shows lots of blending previews  
     * In Composite TOP parameters, “Preview Grid” toggle will show all possible blend modes. If you see one split, that shows the result of different-ordered inputs  
@@ -77,23 +77,24 @@
 * Data  
   * [TouchDesigner's Data Model - Tutorial](https://www.youtube.com/watch?v=Xvg8z_d6ZJU)  
 * Expressions  
-  * me.digits \- grabs the end number of your node  
-* To kill a bunch of nodes, select all w/ctrl \+ a, right-click on empty space and “Collapse selected”, then click the ‘x’ on the Component node to turn off cooking  
+  * me.digits - grabs the end number of your node  
+* To kill a bunch of nodes, select all w/ctrl + a, right-click on empty space and “Collapse selected”, then click the ‘x’ on the Component node to turn off cooking  
 * Facet SOP: Unique Points & 2nd Computer Normals to get low-poly lighting  
 * self in Python  
   * [What is "self" in Python?](https://www.youtube.com/watch?v=oaiQ5hYKHTE)  
   * [How bound methods are the key to understanding SELF in Python.](https://www.youtube.com/watch?v=x4j6bzbbx2o)   
 * Python paths  
-  * C:\\Program Files\\Derivative\\TouchDesigner\\bin\\Lib\\site-packages  
+  * C:\Program Files\Derivative\TouchDesigner\bin\Lib\site-packages  
     * System var path:   
-      C:\\msys64\\ucrt64\\bin  
+      C:\msys64\ucrt64\bin  
     * User var path  
-      C:\\Users\\cacheflowe\\AppData\\Roaming\\Python\\Python311\\Scripts  
-  * [Anaconda \- Managing Python Environments and 3rd-Party Libraries in TouchDesigner | Derivative](https://derivative.ca/community-post/tutorial/anaconda-managing-python-environments-and-3rd-party-libraries-touchdesigner)   
+      C:\Users\cacheflowe\AppData\Roaming\Python\Python311\Scripts  
+  * [Anaconda - Managing Python Environments and 3rd-Party Libraries in TouchDesigner | Derivative](https://derivative.ca/community-post/tutorial/anaconda-managing-python-environments-and-3rd-party-libraries-touchdesigner)   
   * [How to use external python libraries in Touchdesigner](https://www.youtube.com/watch?v=_U5gcTEsupE)  
-  * [External Python Libraries | Derivative](https://derivative.ca/community-post/tutorial/external-python-libraries/61022) \- Matt Ragan external python tutorials  
+  * [External Python Libraries | Derivative](https://derivative.ca/community-post/tutorial/external-python-libraries/61022) - Matt Ragan external python tutorials  
   * [https://derivative.ca/UserGuide/Category:Python](https://derivative.ca/UserGuide/Category:Python)   
-  * [GeoPix V2 - Getting Started \#1 - Installation & Setup](https://www.youtube.com/watch?v=HEdTy6hLl4c)   
+  * [GeoPix V2 - Getting Started #1 - Installation & Setup](https://www.youtube.com/watch?v=HEdTy6hLl4c)   
+  * [TouchDesigner Tutorial : Embedding External Python libraries inside of TOE file](https://www.youtube.com/watch?v=c-pZa9QrTvk)
 * Optimization/performance & larger projects  
   * [https://derivative.ca/UserGuide/Optimize](https://derivative.ca/UserGuide/Optimize)   
   * [The Ultimate Movie Loading Guide For TouchDesigner Projects](https://www.youtube.com/watch?v=EGrBcoH5fjc)  
@@ -119,13 +120,13 @@ Advantages
 * Visualization of graphics operation chains (shaders, compositing, etc)  
 * Instant UI for everything. You have to manually connect that in code  
 * Real-time editing. Debug mode in Java gets us close, but nowhere as fast/sustainable iteration  
-* CPU data \<-\> texture data is very easy  
+* CPU data <-\> texture data is very easy  
 * Multi-machine syncing  
 * Particle systems  
 * Pre-viz (with Unreal too)  
 * Video:  
   * Alpha channel  
-  * HAPq \- High-res  
+  * HAPq - High-res  
 * .fbx, .usd  
 * Persistent variable values when closing/reopening software  
 * Audio functionality & same audio context as VSTs
@@ -157,7 +158,7 @@ Disadvantages
   * [https://github.com/DBraun/TouchDesigner\_Shared](https://github.com/DBraun/TouchDesigner_Shared)   
   * [https://github.com/vinz9/](https://github.com/vinz9/)   
 * Tools  
-  * [https://olib.amb-service.net/](https://olib.amb-service.net/) \- OLIB  
+  * [https://olib.amb-service.net/](https://olib.amb-service.net/) - OLIB  
 * Tutorials  
   * [https://docs.derivative.ca/index.php?title=Tutorials](https://docs.derivative.ca/index.php?title=Tutorials)   
   * [https://interactiveimmersivehq.github.io/touchdesigner-book/](https://interactiveimmersivehq.github.io/touchdesigner-book/)   
@@ -165,7 +166,7 @@ Disadvantages
   * [https://interactiveimmersive.io/blog/touchdesigner-lessons/touchdesigner-beginner-tricks/](https://interactiveimmersive.io/blog/touchdesigner-lessons/touchdesigner-beginner-tricks/)   
   * [TouchDesigner Beginner Crash Course](https://www.youtube.com/playlist?list=PLpuCjVEMQha9rjhDET3uuE0T3UeIcROJu)  
   * [Absolute Beginner TouchDesigner | From Zero to Hero with Examples and Assignments](https://www.youtube.com/watch?v=qbupHTeJCeU)  
-  * [https://www.youtube.com/watch?v=guNquMaplW8\&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG\&index=27](https://www.youtube.com/watch?v=guNquMaplW8&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG&index=27) \- Gray Area class\!  
+  * [https://www.youtube.com/watch?v=guNquMaplW8\&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG\&index=27](https://www.youtube.com/watch?v=guNquMaplW8&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG&index=27) - Gray Area class\!  
   * Torin:  
     * [Face, Hand, Pose Tracking & More in TouchDesigner with @MediaPipe GPU Plugin](https://www.youtube.com/watch?v=Cx4Ellaj6kk)   
     * [Audio-Reactive Visuals in TouchDesigner](https://www.youtube.com/watch?v=R7sAomk2vR4)   
@@ -215,7 +216,7 @@ Disadvantages
   * Using openCV python in TD  
     * [Easy Feature Tracking with Script TOP and OpenCV in TouchDesigner - Tutorial](https://www.youtube.com/watch?v=1Uw2PWTR_XM)  
     * [Tracking QR Codes in TouchDesigner with OpenCV and Script TOP - Tutorial](https://www.youtube.com/watch?v=Nd3KbtY7K1Q)  
-    * [Exporting OpenCV processed Numpy array to TOP directly with Script TOP in TouchDesigner.](https://www.youtube.com/watch?v=uYl0vvmmSwE) \- simple OpenCV/numpy array code example  
+    * [Exporting OpenCV processed Numpy array to TOP directly with Script TOP in TouchDesigner.](https://www.youtube.com/watch?v=uYl0vvmmSwE) - simple OpenCV/numpy array code example  
     * [Detecting arbitrary images with OpenCV Template Matching in TouchDesigner](https://www.youtube.com/watch?v=UF7dujcBXGg)  
     * [https://derivative.ca/community-post/tutorial/anaconda-managing-python-environments-and-3rd-party-libraries-touchdesigner](https://derivative.ca/community-post/tutorial/anaconda-managing-python-environments-and-3rd-party-libraries-touchdesigner)   
     * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/Python/9-6-External-Modules.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/Python/9-6-External-Modules.html)   
@@ -241,7 +242,7 @@ Disadvantages
     * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User\_Interface/2-3-Transport-Controls.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User_Interface/2-3-Transport-Controls.html)   
     * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/TOPs/3-3-Preloading-Movies.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/TOPs/3-3-Preloading-Movies.html)   
     * [https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/using-the-shuffle-chop/](https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/using-the-shuffle-chop/)   
-    * [https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/](https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/) \- timer & text from dat  
+    * [https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/](https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/) - timer & text from dat  
     * [https://matthewragan.com/2015/03/29/ame-394-simple-vj-set-up-touchdesigner/](https://matthewragan.com/2015/03/29/ame-394-simple-vj-set-up-touchdesigner/)   
     * [https://alltd.org/uploader/davidbraun/](https://alltd.org/uploader/davidbraun/)   
       * [https://github.com/DBraun/TouchDesigner\_Shared/blob/master/Audio/low\_pass\_analysis.tox](https://github.com/DBraun/TouchDesigner_Shared/blob/master/Audio/low_pass_analysis.tox)   
@@ -250,49 +251,49 @@ Disadvantages
     * [Exploding Star - constraining a particle system to a sphere TOUCHDESIGNER TUTORIAL](https://www.youtube.com/watch?v=WS2Ww6zYgJw)  
     * [Dynamic Texture Grids – TouchDesigner Tutorial 62](https://www.youtube.com/watch?v=Eq5amV7obwg)  
     * [Depth Of Field (Tilt Shift) – TouchDesigner Tips, Tricks and FAQs 3](https://www.youtube.com/watch?v=EIBGGIdUJyc)  
-    * [TouchDesigner | Working with Midi 3/4](https://www.youtube.com/watch?v=cPvjeikyP-A&list=PLH-IBHIXahauD5cS7NA2YgkGV0FNcSQPM&index=18) \- matt ragan  
-    * [Circularization\_tut\_01](https://www.youtube.com/watch?v=7rHGF0wr0Ck) \- newnome beauton  
-    * [16 – Instancing – TouchDesigner Beginner Course](https://www.youtube.com/watch?v=rYet0SwTYa0) \- elekktronaut  
+    * [TouchDesigner | Working with Midi 3/4](https://www.youtube.com/watch?v=cPvjeikyP-A&list=PLH-IBHIXahauD5cS7NA2YgkGV0FNcSQPM&index=18) - matt ragan  
+    * [Circularization\_tut\_01](https://www.youtube.com/watch?v=7rHGF0wr0Ck) - newnome beauton  
+    * [16 – Instancing – TouchDesigner Beginner Course](https://www.youtube.com/watch?v=rYet0SwTYa0) - elekktronaut  
     * [3/3 TouchDesigner Vol.035 Cooking, Optimization, & SceneChanger](https://www.youtube.com/watch?v=TBI-yq_iE60)  
     * [14 – Palette – TouchDesigner Beginner Course](https://www.youtube.com/watch?v=9RE2iKzRHAg&list=PLFrhecWXVn5862cxJgysq9PYSjLdfNiHz&index=31)  
     * [Advanced Techniques in Media Management, Sequencing and Playback - Peter Sistrom](https://www.youtube.com/watch?v=ufwO61zEAzo)  
-    * [42 Python in Touchdesigner : "0 to Her0" :: Engine Based Mediaplayer](https://www.youtube.com/watch?v=knTkfUkiF_Q) \- unveil  
-    * [21 Four things I was missing for years :-)  \_Touchdesigner](https://www.youtube.com/watch?v=yZDcfR-pS5Y)  
+    * [42 Python in Touchdesigner : "0 to Her0" :: Engine Based Mediaplayer](https://www.youtube.com/watch?v=knTkfUkiF_Q) - unveil  
+    * [21 Four things I was missing for years :-)  _Touchdesigner](https://www.youtube.com/watch?v=yZDcfR-pS5Y)  
     * [Point Clouds Part 1 - Twisting Shrines :: Touchdesigner Work Stream](https://www.youtube.com/watch?v=VNmm3gijDwA)  
-    * [Text Textures – TouchDesigner Tutorial 9](https://www.youtube.com/watch?v=kosFgK7DdCo) \- elekktronaut  
+    * [Text Textures – TouchDesigner Tutorial 9](https://www.youtube.com/watch?v=kosFgK7DdCo) - elekktronaut  
     * [Talking ball Starboy in Touchdesigner (터치디자이너 튜토리얼 자막)](https://www.youtube.com/watch?v=va6cxORsFMw)  
     * [Touchdesigner/ Particles Gpu - Optical flow](https://www.youtube.com/watch?v=PbyjenIvtIA)  
     * [Lillian F. Schwartz-Inspired Visual FX in TouchDesigner - TouchDesigner Tutorial 158](https://www.youtube.com/watch?v=vyJPhh490xE)  
-    * [TouchDesigner | External Python Libraries | 7/8](https://www.youtube.com/watch?v=LFWcsx2Ic6g) \- matt ragan  
+    * [TouchDesigner | External Python Libraries | 7/8](https://www.youtube.com/watch?v=LFWcsx2Ic6g) - matt ragan  
     * [Loading images in folders one by one in sequence with Folder DAT in TouchDesigner](https://www.youtube.com/watch?v=daJdb7N6u2E)  
     * [Generative Visuals with Particles & Kinect: TouchDesigner Tutorial 028](https://www.youtube.com/watch?v=mY7DavB0z2c)  
     * [Touchdesigner tutorial 05 - copy SOP stamping](https://www.youtube.com/watch?v=GaYmXCrFZ5U)  
-    * [Pointcloud Tutorial - Part 2  \[Trailer\]](https://www.youtube.com/watch?v=WZh-TitB-Sk&list=PL4XNsp-R8i-LAHaSqlF8HfIpErYMBOxO5&index=19)  
+    * [Pointcloud Tutorial - Part 2  [Trailer]](https://www.youtube.com/watch?v=WZh-TitB-Sk&list=PL4XNsp-R8i-LAHaSqlF8HfIpErYMBOxO5&index=19)  
     * [Demystifying TouchDesigner SOPs 9. Subdivide Geometry](https://www.youtube.com/watch?v=EyFQXs6QXYY)  
-    * [Simple tornado with glsl (Touchdesigner tutorial)](https://www.youtube.com/watch?v=cm0oUBCtKms) \- noonesimg like newnome  
-    * [Noise Displacement in TouchDesigner](https://www.youtube.com/watch?v=LWpUcaCHD3Q) \- polyhop  
+    * [Simple tornado with glsl (Touchdesigner tutorial)](https://www.youtube.com/watch?v=cm0oUBCtKms) - noonesimg like newnome  
+    * [Noise Displacement in TouchDesigner](https://www.youtube.com/watch?v=LWpUcaCHD3Q) - polyhop  
     * [Teamwork & Version Control  a Git Workflow for TouchDesigner - Idzard Kwadijk](https://www.youtube.com/watch?v=aJ3Lur9zpKU)  
     * [Make Anything Audio Reactive – TouchDesigner Tips, Tricks and FAQs 12](https://www.youtube.com/watch?v=rGoCbVmGtPE)  
     * [Creator Session with Volvox Labs](https://www.youtube.com/watch?v=YZE1vyHB0UM)  
     * [AET 310 - Touchdesigner Project - Main Tutorial - Video 1 - Building the Background](https://www.youtube.com/watch?v=6ZVvhIuPyM0&list=PLmEFHC9k1VTbYPKu5O3ndgpsY7TKWInj9&index=13)  
     * [AME 394 | Multi Process Communication | TouchDesigner](https://www.youtube.com/watch?v=8BKuoFT0W3s&list=PLs0WlHa1rf23bIKTOO7AwY7FaSRExk2Go)  
     * [TD as Game Engine, Part 1: Structure](https://www.youtube.com/watch?v=Ucu2XhWibvg)  
-    * [TouchDesigner \_04 Sliced Type](https://www.youtube.com/watch?v=DeCaJ5EwyIg)  
+    * [TouchDesigner _04 Sliced Type](https://www.youtube.com/watch?v=DeCaJ5EwyIg)  
     * [TouchDesigner Electronic Music Studio - Owen Kirby](https://www.youtube.com/watch?v=Xajdyh7kspk)  
     * [Playing VSTs with MIDI in TouchDesigner - TouchDesigner Tutorial 074](https://www.youtube.com/watch?v=8o6_v-a0Jxg)  
     * [Deconstructing Sculptures - Pointclouds and 3d-models TOUCHDESIGNER TUTORIAL](https://www.youtube.com/watch?v=ruHVM5KZjB8)  
     * [Particle System Following the Geometry Surface | Touchdesinger Tutorial](https://www.youtube.com/watch?v=nqTpxNIuNdA&sttick=0)  
     * [substrate algorithm in TouchDesigner](https://www.youtube.com/watch?v=JBrFLv_kaIE)  
     * [Filtered Pointclouds - Beginner Touchdesigner Tutorial](https://www.youtube.com/watch?v=2SXYHuB42Ek)  
-    * [TouchDesigner \_06 Fluid Simulation](https://www.youtube.com/watch?v=2k6H5Qa_fCE)  
-    * [TouchDesigner \_03 Curl Noise](https://www.youtube.com/watch?v=DkSwEY-m9GA)  
+    * [TouchDesigner _06 Fluid Simulation](https://www.youtube.com/watch?v=2k6H5Qa_fCE)  
+    * [TouchDesigner _03 Curl Noise](https://www.youtube.com/watch?v=DkSwEY-m9GA)  
     * [Animating Noise - TouchDesigner 10](https://www.youtube.com/watch?v=dwh5CS_0EDs)  
     * [Versatile Sprinkle SOP (TouchDesigner tutorial)](https://www.youtube.com/watch?v=Xlyo-njdWcg&sttick=0)  
     * [Motion Tracking with TouchDesigner & MediaPipe - TouchDesigner Tutorial 196](https://www.youtube.com/watch?v=6uibOShiOnU)  
     * [TOUCHDESIGNER Tutorial - Particles SOP](https://www.youtube.com/watch?v=zKzwvBzHKbU)  
     * [Deconstructing Sculptures - Pointclouds and 3d-models TOUCHDESIGNER TUTORIAL](https://www.youtube.com/watch?v=ruHVM5KZjB8&t=4s)  
     * [datamosh in Touchdesigner](https://www.youtube.com/watch?v=_MJ71LyBAjk)  
-    * [\[TouchDesigner - Component\] TauCeti Preset Manager 3.0](https://www.youtube.com/watch?v=SSNvsvrnifI)  
+    * [[TouchDesigner - Component] TauCeti Preset Manager 3.0](https://www.youtube.com/watch?v=SSNvsvrnifI)  
     * [Instancing with the Event CHOP in TouchDesigner - TouchDesigner Tutorial 204](https://www.youtube.com/watch?v=6m5245cCSdo)  
     * [How To Set Up Your Laser To Beyond & TouchDesigner](https://www.youtube.com/watch?v=LdWmvYSK8Zs)  
     * [https://www.youtube.com/@datlabnyc/streams](https://www.youtube.com/@datlabnyc/streams)   
@@ -309,8 +310,8 @@ Disadvantages
       * [POPs Alive: Bring Particle Life to TouchDesigner (EXPERIMENTAL)](https://www.youtube.com/watch?v=yfDHqNEuiZQ)  
       * [Ray POP Tutorial in Touchdesigner](https://www.youtube.com/watch?v=_V43LruvtPw)  
       * [2D Raycasting with TouchDesigner POPs](https://www.youtube.com/watch?v=KydJUFlHFbA)  
-      * [48 :: THE GLSL COPY POP:: pt3 \#touchdesigner](https://www.youtube.com/watch?v=1T8T5TXjxIQ)  
-      * [Text particles with POPs | Part 1: Touchdesigner, POPs, Text, 3D Textures, instancing](https://www.youtube.com/watch?v=s9edKgoumJw) \- Memo Akten  
+      * [48 :: THE GLSL COPY POP:: pt3 #touchdesigner](https://www.youtube.com/watch?v=1T8T5TXjxIQ)  
+      * [Text particles with POPs | Part 1: Touchdesigner, POPs, Text, 3D Textures, instancing](https://www.youtube.com/watch?v=s9edKgoumJw) - Memo Akten  
       * [GLSL for POPs in TouchDesigner: Lesson 1 (Attribute Blur and Neighbor POP)](https://www.youtube.com/watch?v=9BPTB7_IU7Q)  
       * [48 :: THE GLSL COPY POP:: pt3](https://www.youtube.com/watch?v=1T8T5TXjxIQ)  
       * [Strange Attractor GLSL POP - TouchDesigner Tutorial](https://www.youtube.com/watch?v=Ty3u7qfPj2E)  
@@ -319,7 +320,14 @@ Disadvantages
       * [TouchDesigner Tutorial | Distance Constrain Chain](https://www.youtube.com/watch?v=PQmBJf9uvf0)  
       * [TouchDesigner Workshop Intro to POPs | Gravity Particle System](https://www.youtube.com/watch?v=HFZI4lS0mls)  
       * [First POP Experiments Part 1 – TouchDesigner Tutorial 74](https://www.youtube.com/watch?v=B-WJrAIw7Y0)  
+      * [First POP Experiments Part 2 – TouchDesigner Tutorial 75](https://www.youtube.com/watch?v=DHykjByloxo)
+      * [TouchDesigner Tutorial 06 - Strange attractors (POPs)](https://www.youtube.com/watch?v=0cDQ79BrXzo)
       * [TouchDesigner Meetup -- POPs Q&A -- December 2025](https://www.youtube.com/watch?v=b6bzhFImXtM)  
+      * [TouchDesigner Vol.063 Intro to POPs ─ 映えるビジュアルづくり with TsumikiRoom](https://www.youtube.com/watch?v=c7YN_HJRMJo)
+      * [POP starter pack - TouchDesigner](https://www.youtube.com/watch?v=B-Gl9f1TqZA)
+      * [POPs Experimental: Line MAT Trails in TouchDesigner](https://www.youtube.com/watch?v=A5upp-S8Qaw)
+      * [GLSL for POPs in TouchDesigner: Lesson 0 (Introduction to GLSL for POPs)](https://www.youtube.com/watch?v=s4_xHUEfWlI)
+      * [3D Raycasting - TouchDesigner](https://www.youtube.com/watch?v=tls7KgzopEw)
     * [How I Build TouchDesigner Apps in 2025 – Python, State Machines, Extensions](https://www.youtube.com/watch?v=nQT7EhYCVg0)✅  
     * [Smooth Point Cloud Sprinkles with UV Unwrapping in TouchDesigner](https://www.youtube.com/watch?v=U0JRJHGIRug)  
     * [3 ASCII Patterns - WEBCAM, NOISE, Input Movie: Touchdesigner Tutorial](https://www.youtube.com/watch?v=_hPY1hFSa64) ✅  
@@ -328,12 +336,12 @@ Disadvantages
         * Lines between blobs (11:00-ish)  
         * Text overlay (25:00-ish)  
     * [TouchDesigner Meetup - Shaders - June 2024 / Tekt, Josef, Jason](https://www.youtube.com/watch?v=JJabRuWLNzQ) ✅  
-    * [DATLAB TouchDesigner Meetup X Livestream](https://www.youtube.com/watch?v=VbbWoJYkhzQ) \- LOPs, Matterform ✅  
+    * [DATLAB TouchDesigner Meetup X Livestream](https://www.youtube.com/watch?v=VbbWoJYkhzQ) - LOPs, Matterform ✅  
     * [Armin Hoffman Shape Generator in TouchDesigner](https://www.youtube.com/watch?v=bUK_FZ2Ujbc)  
     * [Touchdesigner Tutorial - 3D Rendering with buffers](https://www.youtube.com/watch?v=aVYqxKpI77g)  
-    * [Depth Body Tracking x Interactive Particle with WebCam](https://www.youtube.com/watch?v=EO5bQgerW5U) \- BodyTrack CHOP  
+    * [Depth Body Tracking x Interactive Particle with WebCam](https://www.youtube.com/watch?v=EO5bQgerW5U) - BodyTrack CHOP  
     * [Liquid glass | TouchDesigner Tutorial](https://www.youtube.com/watch?v=lc9gZwFgI1w)  
-    * [CHOP Anatomy: Building-blocks of a CHOP \[Part 1\]](https://www.youtube.com/watch?v=r0dVSn-ZFPw)  
+    * [CHOP Anatomy: Building-blocks of a CHOP [Part 1]](https://www.youtube.com/watch?v=r0dVSn-ZFPw)  
     * [Format Bending #1 - Image2Audio2Image/wavetable weirdness](https://www.youtube.com/watch?v=NtpqL53gyqc)  
     * Unreal integrations  
       * [TouchDesigner and Unreal Engine Integrations](https://www.youtube.com/watch?v=Nd9Ld-R_AxA) (gpu particles)  
@@ -376,7 +384,7 @@ Disadvantages
   * [https://www.youtube.com/@ab_out7036/videos](https://www.youtube.com/@ab_out7036/videos)   
   * [https://www.youtube.com/@as_ws/videos](https://www.youtube.com/@as_ws/videos)   
   * [https://www.youtube.com/@OkamirufuV/videos](https://www.youtube.com/@OkamirufuV/videos)   
-  * [https://www.youtube.com/@Diogo_888/videos](https://www.youtube.com/@Diogo_888/videos) \- typography\!  
+  * [https://www.youtube.com/@Diogo_888/videos](https://www.youtube.com/@Diogo_888/videos) - typography\!  
   * [https://www.youtube.com/@FactorySettings/videos](https://www.youtube.com/@FactorySettings/videos)   
   * [https://www.youtube.com/@g3n0m4_xyz/videos](https://www.youtube.com/@g3n0m4_xyz/videos)	  
   * [https://www.youtube.com/@unveil7762/videos](https://www.youtube.com/@unveil7762/videos)   
