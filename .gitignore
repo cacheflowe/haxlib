@@ -13,3 +13,4 @@ tox/demo
 logs/
 *_vEnv/
 .env
+data/text/app-store.tsv
