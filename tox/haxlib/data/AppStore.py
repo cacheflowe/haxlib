@@ -2,6 +2,7 @@ import json
 import threading
 import time
 import uuid
+import tdu # Import tdu for Dependency
 from subprocess import PIPE, STDOUT, Popen
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -23,6 +24,7 @@ class AppStore:
 		self.ownerComp: baseCOMP = ownerComp
 		self.initListeners()
 		self.initStore()
+		self.initDependencies() # Initialize granular dependencies
 		self.initWebSocket()
 
 	def initListeners(self) -> None:
@@ -35,6 +37,23 @@ class AppStore:
 		self.numericTable: dattoCHOP = self.ownerComp.op('datto_store_numbers')
 		self.fileInTable: tableDAT = self.ownerComp.op('filein_backup')
 		self.defaultsTable: tableDAT = self.ownerComp.op('in_default_values')
+
+	def initDependencies(self) -> None:
+		"""Initialize granular dependency objects from existing table data."""
+		self.dependencies: Dict[str, tdu.Dependency] = {}
+		self.SyncFromTable()
+
+	def SyncFromTable(self) -> None:
+		"""Update dependency objects from the current table state."""
+		# We iterate the table to ensure existing data is reactive
+		if self.storeTable.numRows > 0:
+			for row in self.storeTable.rows():
+				key = row[0].val
+				val = row[1].val
+				if key not in self.dependencies:
+					self.dependencies[key] = tdu.Dependency(val)
+				else:
+					self.dependencies[key].val = val
 
 	def getSenderId(self) -> str:
 		"""Get the sender ID from component parameters."""
@@ -57,25 +76,33 @@ class AppStore:
 	###################################################
 
 	def HasValue(self, key: str) -> bool:
-		"""Check if a key exists in the store."""
-		return self.storeTable.row(key) is not None
+		"""Check if a key exists in the store (checking dependency cache first)."""
+		return key in self.dependencies
 
 	def GetFloat(self, key: str, default: float = 0.0) -> float:
 		"""Get a numeric value from the store."""
-		if self.numericTable[key] is not None:
-			return float(self.numericTable[key])
+		if key in self.dependencies:
+			try:
+				return float(self.dependencies[key].val)
+			except ValueError:
+				pass
 		return default
 
 	def GetString(self, key: str, default: str = '') -> str:
-		"""Get a string value from the store."""
-		if self.storeTable.row(key) is not None:
-			return self.storeTable[key, 1].val
+		"""
+		Get a string value from the store.
+		Reading .val from the dependency object ensures only this specific key's
+		updates will trigger a cook in the calling operator.
+		"""
+		if key in self.dependencies:
+			return str(self.dependencies[key].val)
 		return default
 
 	def GetBoolean(self, key: str, default: bool = False) -> bool:
 		"""Get a boolean value from the store."""
-		if self.storeTable.row(key) is not None:
-			return self.storeTable[key, 1].val.lower() == 'true'
+		if key in self.dependencies:
+			val = str(self.dependencies[key].val)
+			return val.lower() == 'true'
 		return default
 
 	###################################################
@@ -87,6 +114,15 @@ class AppStore:
 		if broadcast:
 			self.broadcastValue(key, value, valueType)
 		else:
+			# Update granular dependency (triggers cooks only for listeners of this key)
+			if key not in self.dependencies:
+				self.dependencies[key] = tdu.Dependency(value)
+			else:
+				self.dependencies[key].val = value
+				# Force Modified logic if value is same? 
+				# tdu.Dependency usually handles equality check, use .modified() if you need to force
+
+			# Update Table (triggers cooks for anyone watching the whole table)
 			eventId = self.newEventId()
 			if self.storeTable.row(key) is not None:
 				self.storeTable[key, 1] = value
@@ -232,9 +268,13 @@ class AppStore:
 	def ClearData(self) -> None:
 		"""Clear all data from the store."""
 		self.storeTable.clear()
+		self.dependencies.clear()
 
 	def RemoveValue(self, key: str, broadcast: bool = False) -> None:
 		"""Remove a value from the store."""
+		if key in self.dependencies:
+			del self.dependencies[key]
+
 		if self.storeTable.row(key) is not None:
 			valueType = self.storeTable[key, 2].val
 			self.storeTable.deleteRow(key)
@@ -390,6 +430,7 @@ class AppStore:
 			print(f'[AppStore] LoadFile: {filePath}')
 			self.fileInTable.par.refreshpulse.pulse()
 			self.storeTable.copy(self.fileInTable)
+			self.SyncFromTable() # Refresh granular dependencies from the loaded table
 
 	###################################################
 	# Debug
