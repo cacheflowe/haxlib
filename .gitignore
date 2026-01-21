@@ -10,3 +10,4 @@ haxlib.*.toe
 node_modules
 _modules
 tox/demo
+logs/
