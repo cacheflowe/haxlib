@@ -1,16 +1,26 @@
+# TD backup files
+Backup/
+haxlib.*.toe
+
+# AppStore / config
+.env
+data/text/app-store.tsv
+
+# TDPyEnvManager
+*_vEnv/
+TDPyEnvManagerContext.json
+
+# Demos
+tox/demo
+
+# Other common ignores
 _assets
 *Thumbs.db
 .DS_Store
 *.log
 output/
-Backup/
 tmp/
 python/_local_modules
-haxlib.*.toe
 node_modules
 _modules
-tox/demo
 logs/
-*_vEnv/
-.env
-data/text/app-store.tsv
