@@ -367,7 +367,7 @@ class AppStore:
 			if key and value and valueType:
 				if not self.HasValue(key) or force:
 					self.SetValue(key, value, valueType,
-								self.getSenderId(), False)
+						self.getSenderId(), False)
 
 	###################################################
 	# File Save/Load
@@ -375,9 +375,12 @@ class AppStore:
 
 	def SaveFile(self) -> None:
 		"""Save the store to a backup file."""
+		if absTime.seconds < 5:
+			print('[AppStore] SaveFile skipped - app just started')
+			return
 		filePath = self.ownerComp.par.Backupfile.eval()
 		if filePath:
-			print(f'[AppStore] SaveFile: {filePath}')
+			# print(f'[AppStore] SaveFile: {filePath}')
 			self.storeTable.save(filePath, createFolders=True)
 
 	def LoadFile(self) -> None:

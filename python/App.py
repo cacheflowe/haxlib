@@ -32,18 +32,30 @@ class App:
 	# ===============================================
 	# Custom App Behavior
 	# ===============================================
-
+	
 	def __init__(self, ownerComp: containerCOMP):
 		self.ownerComp: containerCOMP = ownerComp
 		print("[App] Initializing...")
 		self.AddOpPaths()
+		self.ResizeExtensionNodes()
 		self.AddStoreListeners()
 		if op.AppStore.GetBoolean('is_production') == True:
 			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=1000)
+		op.AppStore.LoadFile()
 		print("[App] Initialized!")
 
 	def AddOpPaths(self):
 		op.AppStore.SetString(App.EMPTY_FRAME_TOP, op('/project1/constant_frame').path)
+	
+	def ResizeExtensionNodes(self):
+		opAppStore = self.ownerComp.op('AppStore')
+		opBootstrap = self.ownerComp.op('Bootstrap')
+		opApp = self.ownerComp.op('App')
+		if opAppStore is not None:
+			opBootstrap.nodeWidth = opAppStore.nodeWidth
+			opBootstrap.nodeHeight = opAppStore.nodeHeight
+			opApp.nodeWidth = opAppStore.nodeWidth
+			opApp.nodeHeight = opAppStore.nodeHeight
 
 	# ===============================================
 	# Global Helpers

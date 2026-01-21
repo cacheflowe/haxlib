@@ -1,0 +1,15 @@
+app_w	3840	number	td_app	1768966585.0218327-16eae802-eb28-451b-bc32-f32c0c9a450a
+app_h	2160	number	td_app	1768966585.0228336-639ac885-057f-4620-b7d1-f587f267e2e2
+dashboard_url	http://localhost:3003/api/dashboard	string	td_app	1768966585.0228336-e2616967-e547-4000-8fd1-bb049ff6be40
+app_id	td-app-test	string	td_app	1768966585.0228336-9c397f2d-63e3-42ec-af06-06c7563ef301
+app_title	TD App Test	string	td_app	1768966585.0228336-5564ed21-3bce-4b4e-8015-34e2c5e41758
+key_released	lctrl	None		1768967202.0490172-52ebaf0d-be0a-4ac9-b172-ef29a89dc81b
+is_justin	True	boolean	td_app	1768967034.4630263-288a6c81-a473-4ea5-be7b-9b936be1c27a
+var1	Something	string	td_app	1768967034.4640245-d9d1dca5-2cee-4f96-b3f7-31b867e9d2a7
+var2	999	number	td_app	1768967034.4640245-00f92f0f-e429-44b2-bae1-ff907d254352
+var3	False	boolean	td_app	1768967034.4640245-edd8d1ee-5ab1-449b-8261-2efc47873096
+empty_frame_top	/project1/constant_frame	string	td_app	1768966609.4131956-b326bf92-daa5-4fc0-9cfe-de0d7c4116a6
+key_pressed	s	None		1768967201.9216645-adf7900c-8bae-4718-9380-13e533d505e7
+perform_toggle	0.0	number	td_app	1768967115.5215771-dd95faa1-4f6a-494e-b4f4-f1a88825ded7
+launch_window	0.0	number	td_app	1768967116.7556384-f724ecab-f99b-461b-8551-86f45d0ac7c3
+close_window	0.0	number	td_app	1768967100.1740196-21f0b7fe-8bf6-47bc-9307-32c8b79e9b23
