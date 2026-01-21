@@ -2,7 +2,6 @@ import os
 import sys
 
 config = op.PyUtils.mod('config')
-print('config module:', config)
 
 class Bootstrap:
 	"""

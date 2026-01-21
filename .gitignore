@@ -12,3 +12,4 @@ _modules
 tox/demo
 logs/
 *_vEnv/
+.env
