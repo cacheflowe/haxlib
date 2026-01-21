@@ -11,3 +11,4 @@ node_modules
 _modules
 tox/demo
 logs/
+*_vEnv/

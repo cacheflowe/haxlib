@@ -21,6 +21,11 @@ def rgba_to_rgb(nA):
 def convert_bgr_to_rgb(nA):
     return cv2.cvtColor(nA, cv2.COLOR_BGR2RGB)
 
+def normalize_td_image(nA):
+	if nA.max() > 1.0:
+		return (nA / 255).astype(numpy.float32)
+	return nA
+
 def denormalize_td_image(nA):
     if nA.max() <= 1.0:
         return (nA * 255).astype(numpy.uint8)
@@ -36,4 +41,23 @@ def resize_image(nA, width, height):
 
 def na_to_mediapipe_image(nA, width=None, height=None):
     return mp.Image(image_format=mp.ImageFormat.SRGB, data=nA)
+	
+def convert_to_float32(nA):
+    return nA.astype(numpy.float32)
 
+def convert_to_uint8(nA):
+    return nA.astype(numpy.uint8)
+
+def convert_to_int32(nA):
+    return nA.astype(numpy.int32)
+
+def add_batch_dimension(nA):
+    return numpy.expand_dims(nA, axis=0)
+
+def imagenet_normalize(nA):
+    """Apply ImageNet normalization: (x / 255 - mean) / std.
+    Assumes input is 0-255 range uint8 or float32."""
+    nA = nA.astype(numpy.float32)
+    mean = numpy.array([0.485, 0.456, 0.406], dtype=numpy.float32)
+    std = numpy.array([0.229, 0.224, 0.225], dtype=numpy.float32)
+    return (nA / 255.0 - mean) / std
