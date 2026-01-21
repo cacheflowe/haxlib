@@ -1,0 +1,38 @@
+## OOP in TD Concepts
+
+- Base Comp or Container is a class
+  - Customize w/parameters
+  - Parexec (*)
+  - op()/ops() - query nodes like document.querySelector() in .js
+  - Global op references are singletons or clone masters. Should only be at top level
+- Cloning & replicators
+  - Replilcator is like a for() loop that creates a bunch of objects from a class definition
+  - Clones are like instances of a class, generally sprinkled throughout a project
+- Externalizing .tox & .py files 
+	- Comp + .py extension = class
+  - for git tracking & easy access in VS Code
+  - externalized python is one step closer to normal AI-assisted dev workflows
+ 	- python relative external file path to tox: `parent().par.externaltox.eval().replace('.tox', '.py')`
+- Python extensions
+	- Class per comp/container
+  	- Can handle lifecycle events
+  	- execute dat traditionally handles some of this
+  - Python -> nodes -> Python flow
+    - Last node is a chopexec that calls back into the class
+  - No floating chopexec scripts!
+  - Logic in python, numeric operations in CHOPs
+  - Dependable properties
+  - /project1 gets an App extension w/global op ref
+- Bootstrap App extension
+  - .env vars
+  - shell env vars
+  - Launch app w/shell script, reliably
+- External python modules - now w/ pyEnvManager
+- Autosave w/dirty tox detection
+- AppStore (w/socket server) - look at Zoox example
+  - Store paths to shared nodes
+- Refactoring
+- Probably not for today
+  - ML tools in TD
+  - Threading
+

@@ -6,6 +6,7 @@ output/
 Backup/
 tmp/
 python/_local_modules
-haxademic.*.toe
+haxlib.*.toe
 node_modules
 _modules
+tox/demo
