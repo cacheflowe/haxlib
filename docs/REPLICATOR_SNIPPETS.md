@@ -8,17 +8,32 @@ me.nodeY
 ```
 
 ```python
-def onReplicate(comp, allOps, newOps, template, master):
-	# get mixer & layout operators
-	opDest = parent().op('merge1')
+def onReplicate(comp: replicatorCOMP, allOps: List[Any], newOps: List[Any], template: Any, master: Any):
+	# template is often a tableDAT
+	# Need to ignore the first row if it contains headers, but me.digits can help with that
+	# if we're selecting row data per replicant
+	template: tableDAT = template
+	print('Building', template.numRows, 'clones')
 
-	for c in newOps:
-		# set props to enable from disabled template
-		c.par.display = 1
-		c.par.enable = 1
-		# connect to destination
-		c.outputConnectors[0].connect(opDest)
+	# master is often a baseCOMP
+	master: baseCOMP = master
+
+	# make connections
+	opMerge: mathCHOP = op('math_merge_audio')
+	
+	# newOps is often a list of replicants created
+	replicant: baseCOMP
+	# for replicant in newOps:
+	for i, replicant in enumerate(newOps):
+
+		# set clone master param - keeps changes synced from master to replicants
+		replicant.par.clone = comp.par.master
+
+		# connect audio output
+		replicant.outputConnectors[0].connect(opMerge)
+
 		pass
 
 	return
+
 ```

@@ -4,6 +4,18 @@ Threading in action:
 - JoystickToMouse.tox
 - PythonWebServer.tox
 - AppStore start webserver cmd 
+- onnx_inference_manager.py
+- Powermate.py
+
+Threadng concepts:
+- Threaded results need to end up on the main thread to interact with TouchDesigner nodes
+  - This can be w/an Execute DAT calling a method every frame to check for results from a thread
+  - Or w/callbacks that use `run()` to schedule code on the main thread?
+- Possible routes for advanced threading
+  - Python thread objects 
+    - locks/queues/events
+  - TD py thread manager
+  - Aysncio.tox
 
 
 Threading:

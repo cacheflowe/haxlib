@@ -10,7 +10,7 @@ data/text/app-store.tsv
 *_vEnv/
 TDPyEnvManagerContext.json
 
-# Demos
+# Demos/WIP
 tox/demo
 
 # Other common ignores

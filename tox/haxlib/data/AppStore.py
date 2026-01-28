@@ -136,18 +136,15 @@ class AppStore:
 
 	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:
 		"""Set a numeric value in the store."""
-		self.SetValue(key, value, self.TYPE_NUMBER,
-					self.getSenderId(), broadcast)
+		self.SetValue(key, value, self.TYPE_NUMBER, self.getSenderId(), broadcast)
 
 	def SetString(self, key: str, value: str, broadcast: bool = False) -> None:
 		"""Set a string value in the store."""
-		self.SetValue(key, value, self.TYPE_STRING,
-					self.getSenderId(), broadcast)
+		self.SetValue(key, value, self.TYPE_STRING, self.getSenderId(), broadcast)
 
 	def SetBoolean(self, key: str, value: bool, broadcast: bool = False) -> None:
 		"""Set a boolean value in the store."""
-		self.SetValue(key, value, self.TYPE_BOOLEAN,
-					self.getSenderId(), broadcast)
+		self.SetValue(key, value, self.TYPE_BOOLEAN, self.getSenderId(), broadcast)
 
 	def broadcastValue(self, key: str, value: Any, valueType: Optional[str]) -> None:
 		"""Broadcast a value change over WebSocket."""

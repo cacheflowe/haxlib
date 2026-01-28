@@ -12,7 +12,8 @@
 	- Comp + .py extension = class
   - for git tracking & easy access in VS Code
   - externalized python is one step closer to normal AI-assisted dev workflows
- 	- python relative external file path to tox: `parent().par.externaltox.eval().replace('.tox', '.py')`
+ 	- python relative external file path to tox: 
+   	- `parent().par.externaltox.eval().replace('.tox', '.py')`
 - Python extensions
 	- Class per comp/container
   	- Can handle lifecycle events
