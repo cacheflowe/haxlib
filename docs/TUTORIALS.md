@@ -192,6 +192,7 @@
     * [Liquid glass | TouchDesigner Tutorial](https://www.youtube.com/watch?v=lc9gZwFgI1w)  
     * [CHOP Anatomy: Building-blocks of a CHOP [Part 1]](https://www.youtube.com/watch?v=r0dVSn-ZFPw)  
     * [Format Bending #1 - Image2Audio2Image/wavetable weirdness](https://www.youtube.com/watch?v=NtpqL53gyqc)  
+    * [Organic Growth - TouchDesigner Tutorial 07](https://www.youtube.com/watch?v=ZWwWxIXHubM)
     * Unreal integrations  
       * [TouchDesigner and Unreal Engine Integrations](https://www.youtube.com/watch?v=Nd9Ld-R_AxA) (gpu particles)  
 * Channels  

@@ -12,17 +12,27 @@ class EpsonThermalPrint:
 	Docs: https://python-escpos.readthedocs.io/en/latest/api/escpos.html
 
 	"""
-	def __init__(self, ownerComp):
+	def __init__(self, ownerComp=None, printerIp=None):
 		self.ownerComp = ownerComp
-		self.opCache = self.ownerComp.op('cache1')
-		self.topData = None
+		self.printerIp = printerIp
+		
+		if self.ownerComp:
+			self.opCache = self.ownerComp.op('cache1')
+			self.printerIp = self.ownerComp.par.Printeripaddress.eval()
+			self.topData = None
+		elif self.printerIp is None:
+			print("Warning: No ownerComp or printerIp provided. Printing will fail until an IP is set.")
 
 	def PrintInputTOP(self):
+		if not self.ownerComp:
+			raise RuntimeError("PrintInputTOP requires TouchDesigner environment")
 		self.opCache.par.activepulse.pulse()
 		# delay to allow cached image to be ready
 		run(lambda: self.PrintInputTOPImmediate(), delayFrames=1)
 
 	def PrintInputTOPImmediate(self):
+		if not self.ownerComp:
+			raise RuntimeError("PrintInputTOPImmediate requires TouchDesigner environment")
 		# get numpy array from TOP
 		self.topData = self.opCache.numpyArray(delayed=False)
 
@@ -58,17 +68,30 @@ class EpsonThermalPrint:
 		pilImage = pilImage.resize((printer_width, height), PIL.Image.LANCZOS)
 
 		# Send image to printer
-		self.printer = Network(self.ownerComp.par.Printeripaddress.eval(), profile="TM-T88III")  # Even though it's actually a T88VI
+		self.printer = Network(self.printerIp, profile="TM-T88III")  # Even though it's actually a T88VI
 		self.printer.image(pilImage, impl='bitImageRaster')
 
 		# finish!
 		self.CompletePrintJob()
 
 	def PrintInputDAT(self):
-		self.printer = Network(self.ownerComp.par.Printeripaddress.eval(), profile="TM-T88III")  # Even though it's actually a T88VI
+		if not self.ownerComp:
+			print("PrintInputDAT requires TouchDesigner environment")
+			return
+			
+		# Get input text 
+		# Attempt to use ownerComp.op if available to scope locally, otherwise rely on global op
+		if hasattr(self.ownerComp, 'op'):
+			text = self.ownerComp.op('in2').text
+		else:
+			# Fallback for TD context where op might be global
+			text = op('in2').text
+			
+		self.PrintMarkdown(text)
+
+	def PrintMarkdown(self, text):
+		self.printer = Network(self.printerIp, profile="TM-T88III")  # Even though it's actually a T88VI
 		
-		# Get input text and split into lines
-		text = op('in2').text
 		lines = text.split('\n')
 		
 		# Process each line for markdown formatting
@@ -115,9 +138,19 @@ class EpsonThermalPrint:
 		self.CompletePrintJob()
 
 	def PrintInputDATSimple(self):
-		self.printer = Network(self.ownerComp.par.Printeripaddress.eval(), profile="TM-T88III")  # Even though it's actually a T88VI
-		self.printer.text(op('in2').text + "\n")
-		# self.printer.writelines('Big line\\n', font='b')
+		if not self.ownerComp:
+			return
+		
+		if hasattr(self.ownerComp, 'op'):
+			text = self.ownerComp.op('in2').text
+		else:
+			text = op('in2').text
+			
+		self.PrintText(text)
+
+	def PrintText(self, text):
+		self.printer = Network(self.printerIp, profile="TM-T88III")  # Even though it's actually a T88VI
+		self.printer.text(text + "\n")
 		self.CompletePrintJob()
 
 	def CompletePrintJob(self):
@@ -131,3 +164,44 @@ class EpsonThermalPrint:
 
 	def onInitTD(self):
 		return
+
+if __name__ == "__main__":
+	import argparse
+	
+	# Simple CLI interface
+	parser = argparse.ArgumentParser(description='Epson Thermal Print Utility')
+	parser.add_argument('--ip', required=True, help='Printer IP Address')
+	parser.add_argument('--image', help='Path to image file to print')
+	parser.add_argument('--text', help='Text string to print')
+	parser.add_argument('--file', help='Text file to print')
+	parser.add_argument('--markdown', action='store_true', help='Interpret text as markdown')
+	
+	args = parser.parse_args()
+
+	printer = EpsonThermalPrint(printerIp=args.ip)
+	
+	try:
+		if args.image:
+			print(f"Printing image: {args.image}")
+			printer.PrintImageFromDisk(args.image)
+			
+		if args.text:
+			if args.markdown:
+				print("Printing markdown text...")
+				printer.PrintMarkdown(args.text)
+			else:
+				print("Printing text...")
+				printer.PrintText(args.text)
+				
+		if args.file:
+			with open(args.file, 'r') as f:
+				content = f.read()
+				if args.markdown or args.file.endswith('.md'):
+					print(f"Printing markdown file: {args.file}")
+					printer.PrintMarkdown(content)
+				else:
+					print(f"Printing text file: {args.file}")
+					printer.PrintText(content)
+					
+	except Exception as e:
+		print(f"Error: {e}")
