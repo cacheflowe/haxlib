@@ -1,25 +1,25 @@
 import numpy
-import mediapipe as mp
+# import mediapipe as mp
 import cv2
 
 def flip_v(nA):
-    return cv2.flip(nA, 0)
+	return cv2.flip(nA, 0)
 
 def flip_h(nA):
-    return cv2.flip(nA, 1)
+	return cv2.flip(nA, 1)
 
 def grayscale_to_rgb(nA):
-    if len(nA.shape) == 2:  # If input is grayscale
-        return cv2.cvtColor(nA, cv2.COLOR_GRAY2RGB)
-    return nA
+	if len(nA.shape) == 2:  # If input is grayscale
+		return cv2.cvtColor(nA, cv2.COLOR_GRAY2RGB)
+	return nA
 
 def rgba_to_rgb(nA):
-    if nA.shape[2] == 4:  # If input is RGBA
-        return nA[:, :, :3]  # Drop the alpha channel
-    return nA
+	if nA.shape[2] == 4:  # If input is RGBA
+		return nA[:, :, :3]  # Drop the alpha channel
+	return nA
 
 def convert_bgr_to_rgb(nA):
-    return cv2.cvtColor(nA, cv2.COLOR_BGR2RGB)
+	return cv2.cvtColor(nA, cv2.COLOR_BGR2RGB)
 
 def normalize_td_image(nA):
 	if nA.max() > 1.0:
@@ -27,37 +27,37 @@ def normalize_td_image(nA):
 	return nA
 
 def denormalize_td_image(nA):
-    if nA.max() <= 1.0:
-        return (nA * 255).astype(numpy.uint8)
-    return nA
+	if nA.max() <= 1.0:
+		return (nA * 255).astype(numpy.uint8)
+	return nA
 
 def ensure_dtype(nA, dtype=numpy.uint8):
-    if nA.dtype != dtype:
-        return nA.astype(dtype)
-    return nA
+	if nA.dtype != dtype:
+		return nA.astype(dtype)
+	return nA
 
 def resize_image(nA, width, height):
-    return cv2.resize(nA, (width, height))
+	return cv2.resize(nA, (width, height))
 
-def na_to_mediapipe_image(nA, width=None, height=None):
-    return mp.Image(image_format=mp.ImageFormat.SRGB, data=nA)
+# def na_to_mediapipe_image(nA, width=None, height=None):
+#     return mp.Image(image_format=mp.ImageFormat.SRGB, data=nA)
 	
 def convert_to_float32(nA):
-    return nA.astype(numpy.float32)
+	return nA.astype(numpy.float32)
 
 def convert_to_uint8(nA):
-    return nA.astype(numpy.uint8)
+	return nA.astype(numpy.uint8)
 
 def convert_to_int32(nA):
-    return nA.astype(numpy.int32)
+	return nA.astype(numpy.int32)
 
 def add_batch_dimension(nA):
-    return numpy.expand_dims(nA, axis=0)
+	return numpy.expand_dims(nA, axis=0)
 
 def imagenet_normalize(nA):
-    """Apply ImageNet normalization: (x / 255 - mean) / std.
-    Assumes input is 0-255 range uint8 or float32."""
-    nA = nA.astype(numpy.float32)
-    mean = numpy.array([0.485, 0.456, 0.406], dtype=numpy.float32)
-    std = numpy.array([0.229, 0.224, 0.225], dtype=numpy.float32)
-    return (nA / 255.0 - mean) / std
+	"""Apply ImageNet normalization: (x / 255 - mean) / std.
+	Assumes input is 0-255 range uint8 or float32."""
+	nA = nA.astype(numpy.float32)
+	mean = numpy.array([0.485, 0.456, 0.406], dtype=numpy.float32)
+	std = numpy.array([0.229, 0.224, 0.225], dtype=numpy.float32)
+	return (nA / 255.0 - mean) / std

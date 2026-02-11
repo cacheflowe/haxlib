@@ -11,9 +11,11 @@ Subprocess:
 - https://matthewragan.com/2019/08/14/touchdesigner-python-and-the-subprocess-module/
 Windows extensions:
 - https://github.com/mhammond/pywin32
-
 Internal python modules for TD:
 - https://docs.derivative.ca/MOD_Class
+- https://medium.com/partical.grt/local-variables-modules-and-storage-touch-touchdesigner-tip-4-320bc6ba14c
+Parameters and storage
+- https://docs.derivative.ca/Internal_Parameters#Pros_and_Cons_of_Internal_Parameters
 
 Example import of a Text DAT (named `onnx_util`) as a module, 4 equivalent ways:
 ```python
