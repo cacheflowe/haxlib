@@ -41,7 +41,6 @@ class App:
 		self.AddStoreListeners()
 		if op.AppStore.GetBoolean('is_production') == True:
 			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=1000)
-		op.AppStore.LoadFile()
 		print("[App] Initialized!")
 
 	def AddOpPaths(self):

@@ -1,3 +1,3 @@
-start "TD Launch" ..\haxademic.toe
+start "TD Launch" ..\haxlib.toe
 
 exit

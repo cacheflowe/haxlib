@@ -40,7 +40,8 @@ class Bootstrap:
 	# 		sys.path.append(utils_path)
 
 	def loadEnvVars(self):
-		# import config
+		# Load any saved AppStore values first
+		op.AppStore.LoadFile()
 		# Make sure AppStore has the latest defaults set before loading env vars that could override them
 		op.AppStore.par.Applydefaults.pulse()
 		# Load .env file and system environment vars
