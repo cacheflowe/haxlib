@@ -111,7 +111,6 @@ def easeOutSine(t, b, c, d):
 def easeOutSineNorm(t):
 	return easeOutSine(t, 0, 1, 1)
 
-
 def easeInOutSine(t, b, c, d):
 	return -c/2 * (math.cos(math.pi*t/d) - 1) + b
 
@@ -130,8 +129,11 @@ def easeOutExpo(t, b, c, d):
 def easeOutExpoNorm(t):
 	return easeOutExpo(t, 0, 1, 1)
 
-
 def easeInOutExpo(t, b, c, d):
+	if t == 0:
+		return b
+	if t == d:
+		return b + c
 	t /= d/2
 	if t < 1: 
 		return c/2 * math.pow( 2, 10 * (t - 1) ) + b
@@ -149,7 +151,7 @@ def easeInCircNorm(t):
 	return easeInCirc(t, 0, 1, 1)
 
 def easeOutCirc(t, b, c, d):
-	t /= d;
+	t /= d
 	t -= 1
 	return c * math.sqrt(1 - t*t) + b
 
