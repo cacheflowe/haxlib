@@ -266,6 +266,7 @@ class AppStore:
 		"""Clear all data from the store."""
 		self.storeTable.clear()
 		self.dependencies.clear()
+		self.SetDefaults()
 
 	def RemoveValue(self, key: str, broadcast: bool = False) -> None:
 		"""Remove a value from the store."""
