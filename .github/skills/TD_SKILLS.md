@@ -175,6 +175,7 @@ op('table1')['rowName', 'colName'].val  # By names
 - [td-oop/SKILL.md](td-oop/SKILL.md) — OOP concepts in TD (COMPs as classes, cloning, global refs)
 - [td-extension-template/SKILL.md](td-extension-template/SKILL.md) — Full extension template with StorageManager and lifecycle
 - [td-replicator/SKILL.md](td-replicator/SKILL.md) — Replicator COMP patterns
+- [td-wiring/SKILL.md](td-wiring/SKILL.md) — Programmatic node wiring (connectors, multi-input, COMP connections)
 
 ### GLSL
 - [td-glsl/SKILL.md](td-glsl/SKILL.md) — GLSL reference (built-in uniforms, functions, samplers, snippets)
