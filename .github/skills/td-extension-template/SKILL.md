@@ -11,6 +11,15 @@ Complete template for creating Python extensions attached to COMPs, with proper 
 - [Dependency Class](https://derivative.ca/UserGuide/Dependency_Class)
 - [CallbacksExt Extension](https://derivative.ca/UserGuide/CallbacksExt_Extension)
 
+## Overview
+
+Extensions in TouchDesigner allow you to attach Python classes to components, providing object-oriented programming capabilities. This template includes:
+- Proper initialization with dependable properties
+- Persistent storage using StorageManager
+- Lifecycle callbacks (onInitTD, cleanup methods)
+- AppStore visibility callbacks
+- Cleanup/disposal patterns for different TD versions
+
 ## Full Template
 
 ```python
@@ -48,6 +57,17 @@ class NewExtension:
 	def Reset(self):
 		"""Reset extension state."""
 		return
+
+	###################################################
+	# AppStoreToggle callbacks
+	###################################################
+
+	def On_show(self):
+		self.Reset()  
+
+	def On_hidden(self):
+		self.Reset()
+
 
 	###################################################
 	# Cleanup — handles both old and new TD versions
@@ -115,6 +135,11 @@ Each entry creates a property on `self` backed by operator storage. `dependable:
 | `__delTD__()` | Pre-experimental cleanup on destroy/reinit |
 | `onDestroyTD()` | Experimental cleanup on destroy/reinit |
 | `__del__()` | Python garbage collection (after onDestroyTD) |
+
+### AppStoreToggle Callbacks
+
+- **`On_show()`**: Called when component becomes visible in associated AppStoreToggle
+- **`On_hidden()`**: Called when component is hidden in associated AppStoreToggle
 
 ### Accessing Extensions
 
