@@ -343,3 +343,11 @@ For external editing with type hints and autocomplete:
 1. Point your IDE to TouchDesigner's Python: `C:\Program Files\Derivative\TouchDesigner\bin\python.exe`
 2. Install TD stubs for autocomplete (if available)
 3. Configure your IDE to use tabs for indentation
+
+VS Code users can set up a workspace with the following settings in `.vscode/settings.json`:
+```json
+{
+    "python.defaultInterpreterPath": "C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe",
+    "editor.insertSpaces": false,
+    "editor.tabSize": 4,
+}

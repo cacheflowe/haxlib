@@ -94,5 +94,5 @@ td.runs.clear()  # Cancel all pending runs
 
 ## See Also
 
-- [td-python-patterns.md](td-python-patterns.md) — General Python patterns
-- [td-threading.md](td-threading.md) — Threading for long-running operations
+- [td-python-patterns.md](../td-python-patterns/SKILL.md) — General Python patterns
+- [td-threading.md](../td-threading/SKILL.md) — Threading for long-running operations

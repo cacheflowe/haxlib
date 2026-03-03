@@ -229,5 +229,5 @@ const uint cTDBufferArraySize_AttribName;
 
 ## See Also
 
-- [td-python-patterns.md](td-python-patterns.md) — Python patterns (TOP pixel access via `numpyArray()`)
-- [prompt-glsl-cleanup.md](prompt-glsl-cleanup.md) — AI prompt for cleaning up GLSL code
+- [td-python-patterns.md](../td-python-patterns/SKILL.md) — Python patterns (TOP pixel access via `numpyArray()`)
+- [prompt-glsl-cleanup.md](../prompt-glsl-cleanup/SKILL.md) — AI prompt for cleaning up GLSL code

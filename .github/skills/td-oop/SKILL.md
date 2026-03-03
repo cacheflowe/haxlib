@@ -144,6 +144,6 @@ Launch via shell script for reliable startup with environment variables.
 
 ## See Also
 
-- [td-extension-template.md](td-extension-template.md) — Full extension template
-- [td-replicator.md](td-replicator.md) — Replicator patterns
-- [td-python-style.md](td-python-style.md) — Naming conventions
+- [td-extension-template.md](../td-extension-template/SKILL.md) — Full extension template
+- [td-replicator.md](../td-replicator/SKILL.md) — Replicator patterns
+- [td-python-style.md](../td-python-style/SKILL.md) — Naming conventions

@@ -305,4 +305,4 @@ text = ui.clipboard
 ## See Also
 
 - [../TD_SKILLS.md](../TD_SKILLS.md) — Philosophy, retrieval strategy, class hierarchy
-- [td-common-mistakes.md](td-common-mistakes.md) — Mistake/correction pairs
+- [td-common-mistakes.md](../td-common-mistakes/SKILL.md) — Mistake/correction pairs
