@@ -1,0 +1,136 @@
+/* Global CSS variables */
+:root {
+  /* COLORS */
+  --white: #ffffff;
+  --black: #000000;
+  --dark-green: #005534;
+  --clean-green: #00b334;
+  --magic-green: #69ff00;
+  --spacing-company: 3rem;
+
+  --gilroy-black: "Gilroy Black";
+  --font-weight: 400;
+  --border-radius: 0;
+  --text-bg: rgba(255, 255, 255, 0.6);
+  /*
+  --pico-primary-focus: var(--magic-green);
+  --pico-switch-checked-background-color: var(--magic-green);
+  --pico-accordion-open-summary-color: var(--clean-green);
+  --pico-accordion-active-summary-color: var(--clean-green);
+  */
+}
+
+@media only screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --pico-background-color: #111;
+    --text-bg: rgba(0, 0, 0, 0.6);
+    /* 
+    --pico-primary-focus: var(--magic-green);
+    --pico-switch-checked-background-color: var(--magic-green);
+    --pico-accordion-open-summary-color: var(--clean-green);
+    --pico-accordion-active-summary-color: var(--clean-green); 
+    */
+  }
+}
+
+/* GILROY */
+
+@font-face {
+  font-family: "Gilroy Black";
+  src: url("/fonts/gilroy/Gilroy-Black.otf") format("opentype");
+  font-weight: 900;
+  font-style: normal;
+}
+
+/* Typography */
+h2,
+h3,
+hgroup > :last-child {
+  font-weight: 200;
+}
+
+small {
+  color: var(--muted-color);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  font-family: var(--gilroy-bold);
+}
+
+button {
+  transition: all 0.2s;
+}
+
+/* Pico basic button override
+[role="button"],
+[type="button"],
+[type="file"]::file-selector-button,
+[type="reset"],
+[type="submit"],
+button {
+  border: none;
+  background: var(--clean-green);
+  color: #fff;
+  text-align: center;
+
+  &:active {
+    background: var(--magic-green-gradient);
+    color: var(--black);
+  }
+}
+*/
+
+.container {
+  width: 100%;
+  overflow: hidden;
+}
+
+@media (min-width: 640px) {
+  .container {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+}
+@media (min-width: 768px) {
+  .container {
+    max-width: 768px;
+    margin: 0 auto;
+  }
+}
+
+custom-app {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2rem;
+}
+
+.logo {
+  max-width: 18rem;
+  margin-bottom: var(--pico-spacing);
+}
+
+.volume-container {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+
+  height: 3.6rem;
+  padding: 0 1.2rem;
+
+  .volume-svg {
+    width: 2rem;
+  }
+
+  app-store-slider {
+    flex-grow: 1;
+    input {
+      margin-bottom: 0;
+    }
+  }
+}

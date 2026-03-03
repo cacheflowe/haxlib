@@ -1,9 +1,49 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
-    <meta http-equiv="refresh" content="0;url=app-store-demo/" />
+    <meta charset="utf-8" />
+    <meta content="text/html; charset=UTF-8" http-equiv="Content-Type" />
+    <meta content="IE=edge,chrome=1" http-equiv="X-UA-Compatible" />
+    <meta content="no" name="imagetoolbar" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="apple-touch-icon-precomposed" href="/icon.png" />
+    <link rel="apple-touch-startup-image" href="/icon.png" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🟢</text></svg>"
+    />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="AppStore" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="format-detection" content="email=no" />
+    <title>Client UI</title>
   </head>
   <body>
-    <p>Redirecting to <a href="app-store-demo/">app-store-demo</a></p>
+    <app-store-init sender="tablet" init-keys="*" debug side-debug></app-store-init>
+    <app-store-heartbeat key="tablet_heartbeat" value="n/a" interval="30000" show="false"></app-store-heartbeat>
+    <notyf-listener></notyf-listener>
+    <custom-app>
+      <main class="container">
+        <section>
+          <header><img class="logo" src="/images/oversite-logo.png" alt="" /></header>
+          <p style="text-align: center">
+            <a role="button" href="ui.html">Client UI</a>
+          </p>
+          <p style="text-align: center">
+            <a role="button" href="http://localhost:3002/">Oversite</a> <code>npm run all</code>
+          </p>
+        </section>
+        <hr />
+        <details>
+          <summary>Event Log</summary>
+          <app-store-event-table max-length="10" hide-filters></app-store-event-table>
+        </details>
+      </main>
+      <footer class="container">
+        <small>Built by Us 👋</small>
+      </footer>
+    </custom-app>
+    <script type="module" src="./src/js/ui.js"></script>
   </body>
 </html>
