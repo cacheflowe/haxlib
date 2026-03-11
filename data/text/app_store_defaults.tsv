@@ -1,0 +1,5 @@
+app_w	1920	number
+app_h	1080	number
+dashboard_url	http://localhost:3003/api/dashboard	string
+app_id	td-app-test	string
+app_title	TD App Test	string

@@ -1,0 +1,6 @@
+file	volume	loops	store_key	store_value	attack	sustain	release	store_key_stop	store_value_stop
+beep_echo_lo.wav	0.6	0	app_state	gameplay	0.3	0	0.3		
+cui_00341.wav			app_state	game_over	0	0	0.5		
+cui_00391.wav			app_state	attract					
+ea01_seq_130bpm.wav	0.4	1	btn_toggle	1	1		2	app_state	attract
+cui_00352.wav	0.4		btn_pulse	1					
