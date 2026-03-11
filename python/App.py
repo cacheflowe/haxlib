@@ -48,7 +48,7 @@ class App:
 		print("[App] Initialized!")
 
 	def SetInitialMode(self):
-		if op.AppStore.GetString(App.APP_STATE, "NONE") is not "NONE":
+		if op.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
 			# Resume previous state in AppStore on startup
 			print(f"[App] Resetting current state: {self.CurState()}")
 			curState = self.CurState()
