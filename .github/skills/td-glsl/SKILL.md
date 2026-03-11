@@ -262,6 +262,7 @@ So for example to get the width of the first 2D input, you could type:
 
 When the input is a texture that has depth (3D or 2D Array), then the depth variable will contain the depth, and the depthOffset. The depthOffset is the offset from the texture coordinate at the front of the texture to the texture coordinate of the slice of the input that was most recently updated. So if you wanted a TOP that always output the newest slice of a 3D texture use this shader
 
+```glsl
   layout(location = 0) out vec4 fragColor;
   void main()
   {
@@ -275,22 +276,24 @@ When the input is a texture that has depth (3D or 2D Array), then the depth vari
       // now sample the texture
       fragColor = texture(sTD3DInputs[0], vec3(vUV.st, firstSlice));
   }
+```
 
 For 3D textures the depthOffset is always between 0 and 1.  For 2D Arrays the offset is between 0 and (depth - 1), and will always be an integer.
 
 
-
 When outputting a 3D or 2D Array texture, this uniform holds the slice index that you are currently rendering to.
- 
- // Refer to [[#3D Textures and 2D Texture Arrays |3D Textures and 2D Texture Arrays]]
-  uniform int uTDCurrentDepth;
-  
+
+```glsl
+// Refer to [[#3D Textures and 2D Texture Arrays |3D Textures and 2D Texture Arrays]]
+uniform int uTDCurrentDepth;
+```
 
 When using the "Num Passes" parameter on the Common page of the GLSL TOP, it is often useful to know which pass you are currently rendering in the shader. You can do this by looking at the uniform
-  
-  // The current render pass in the GLSL TOP, starts at 0 and counts up.
-  uniform int uTDPass;
-  
+
+```glsl
+// The current render pass in the GLSL TOP, starts at 0 and counts up.
+uniform int uTDPass;
+```
 
 ## Atomic Counters
 
@@ -298,17 +301,22 @@ Atomic counters are global unsigned integers that can have atomic operations per
 
 Below is a simple example of a pixel shader where the atomic counter is incremented each time (ie. once per pixel), converted to a float, and then put into the red channel. Visually, pixels that are rendered first will be a darker red than those rendered last.
 
-  uniform atomic_uint ac;
-  out vec4 fragColor;
-  void main()
-  {
-     uint c = atomicCounterIncrement(ac);
-     float r = (c/255)/255.f;
-     fragColor = vec4(r,0,0,1);
-  }
+```glsl
+uniform atomic_uint ac;
+out vec4 fragColor;
+void main()
+{
+  uint c = atomicCounterIncrement(ac);
+  float r = (c/255)/255.f;
+  fragColor = vec4(r,0,0,1);
+}
+```
 
 They can also be declared and initialized as arrays by declaring them as:
-  uniform atomic_uint ac[10];
+
+```glsl
+uniform atomic_uint ac[10];
+```
 
 Note that although many online examples will prefix the declaration with a binding location such as <code>layout (binding = 0)</code>, it is more efficient to omit that and let our compiler assign the binding automatically.
 
@@ -323,33 +331,62 @@ These are TouchDesigner specific functions which are made available for use with
 
 ### Perlin and Simplex Noise
 
-  // Noise functions
-  // These will return the same result for the same input
-  // Results are between -1 and 1
-  // Can be slow so just be aware when using them. 
-  // Different dimensionality selected by passing vec2, vec3 or vec4. 
-  float TDPerlinNoise(vec2 v);
-  float TDPerlinNoise(vec3 v);
-  float TDPerlinNoise(vec4 v);
-  float TDSimplexNoise(vec2 v);
-  float TDSimplexNoise(vec3 v);
-  float TDSimplexNoise(vec4 v);
+```glsl
+// Noise funtcions
+// These will return the same result for the same input
+// Results are between -1 and 1
+// Can be slow so just be aware when using them. 
+// Different dimensionality selected by passing vec2, vec3 or vec4. 
+float TDPerlinNoise(vec2 v);
+float TDPerlinNoise(vec3 v);
+float TDPerlinNoise(vec4 v);
+float TDSimplexNoise(vec2 v);
+float TDSimplexNoise(vec3 v);
+float TDSimplexNoise(vec4 v);
+```
 
 ### HSV Conversion
 
-  // Converts between RGB and HSV color space
-  vec3 TDHSVToRGB(vec3 c);
-  vec3 TDRGBToHSV(vec3 c);
+```glsl
+// Converts between RGB and HSV color space
+vec3 TDHSVToRGB(vec3 c);
+vec3 TDRGBToHSV(vec3 c);
+```
 
 ### Dithering
-  
-  // Applies a small random noise to the color to help avoid banding
-  // in some cases.
-  vec4 TDDither(vec4 color);
+
+```glsl
+// Applies a small random noise to the color to help avoid banding
+// in some cases.
+vec4 TDDither(vec4 color);
+```
   
 ### Matrix Functions
-  
-  {{:GLSL_Matrix_Functions}}
+
+```glsl
+// Creates a translation matrix for the given 3 translation values.
+mat4 TDTranslate(float x, float y, float z);
+
+// Creates a rotation matrix that rotates around the +X, +Y and +Z axis repectively.
+mat3 TDRotateX(float radians);
+mat3 TDRotateY(float radians);
+mat3 TDRotateZ(float radians);
+
+// Creates a rotation matrix that rotates around the 'axis', the given number of 'radians'
+// The 'axis' vector must already be normalized before being passed to this function.
+mat3 TDRotateOnAxis(float radians, vec3 axis);
+
+// Creates a scale matrix for the given 3 scale values.
+mat3 TDScale(float x, float y, float z);
+
+// Creates a rotation matrix that rotates starting from looking down +Z, to the 'forward' vector direction.
+// The 'forward' and 'up' vectors passed to this function do not need to be normalized.
+mat3 TDRotateToVector(vec3 forward, vec3 up);
+
+// Creates a rotation matrix to rotate from vector 'from' to vector 'to'. The solution isn't particularly stable, but useful in some cases.
+// The 'from' and 'to' vectors must already be normalized before being passed to this function.
+mat3 TDCreateRotMatrix(vec3 from, vec3 to);
+```
 
 ## Sampling more than one pixel
 
@@ -358,24 +395,26 @@ It some shaders you may want to sample more than one pixel from the input TOP (w
 In texture coordinate terms, the value difference between one pixel and the pixel directly to the right of it is (1.0 / width). Similarly, the value difference between one pixel and the pixel directly below it is -(1.0 / height).
 The following function is helpful in calculating the correct texture coordinates for neighboring pixels:
 
-   // This function is not provided for you, you need to declare it yourself.
-   vec2 input2DOffset(int texIndex, int xOffset, int yOffset)
-   {
-       return vec2(vUV.s + (float(xOffset) * uTD2DInfos[texIndex].res.s),
-                  vUV.t + (float(yOffset) * uTD2DInfos[texIndex].res.t));
-   }
-
+```glsl
+// This function is not provided for you, you need to declare it yourself.
+vec2 input2DOffset(int texIndex, int xOffset, int yOffset)
+{
+    return vec2(vUV.s + (float(xOffset) * uTD2DInfos[texIndex].res.s),
+              vUV.t + (float(yOffset) * uTD2DInfos[texIndex].res.t));
+}
+```
 
 There is however a new function is GLSL, <code>textureOffset()</code> which does this work for you. It has a limited range it can sample from the starting coordinate though, so it can't be used to get an arbitrary sample offset from a coordinate.
 
 Here is a very simple blur shader that will sample a 3x3 grid around each pixel and output the average value of all 9 pixels. It's manually calculating the offsets instead of using <code>textureOffset</code>, although <code>textureOffset</code> would work fine in this example since the offsets are only 1 pixel.
 
+```glsl
   vec2 input2DOffset(int texIndex, int xOffset, int yOffset)
   {
       return vec2(vUV.s + (float(xOffset) * uTD2DInfos[texIndex].res.s),
                  vUV.t + (float(yOffset) * uTD2DInfos[texIndex].res.t));
   }
-  <br>
+  
   layout(location = 0) out vec4 fragColor;
   void main()
   {
@@ -388,9 +427,10 @@ Here is a very simple blur shader that will sample a 3x3 grid around each pixel 
       colorSum += texture(sTD2DInputs[0], input2DOffset(0, 1, 1));
       colorSum += texture(sTD2DInputs[0], input2DOffset(0, 0, 1));
       colorSum += texture(sTD2DInputs[0], input2DOffset(0, -1, 1));
-      colorSum += texture(sTD2DInputs[0], input2DOffset(0, -1, 0));<br>
+      colorSum += texture(sTD2DInputs[0], input2DOffset(0, -1, 0));
       fragColor = colorSum / 9.0;
   }
+```
 
 ## 3D Textures and 2D Texture Arrays
 
@@ -414,9 +454,11 @@ The output connector on the GLSL TOP will always output the color for the first 
 ### Pixel Shaders
 In your shader declare your other other output locations. For example if your plan to output to 3 different buffers you could declare them like this:
 
+```glsl
   layout(location = 0) out vec4 fragColor;
   layout(location = 1) out vec4 otherColor;
   layout(location = 2) out vec4 extraInfo;
+```
 
 Now you can write to <code>fragColor</code>, <code>otherColor</code> and <code>extraInfo</code> to write to the 3 color buffers that your are outputting to. If you don't write to all of your outputs in all cases, the resulting pixel value is undefined. Don't avoid writing a value to try to keep last frame's value in the buffer.
 
@@ -428,20 +470,25 @@ The <code>sTDComputeOutputs[]</code> uniform will be sized equal to the number o
 
 In most cases you will not need to provide a vertex shader to the GLSL TOP. If you decide to provide a vertex shader, it's most basic form would be:
 
+```glsl
   out vec3 texCoord;
   void main()
   {
        texCoord = uv[0];
        gl_Position = TDSOPToProj(vec4(P, 1.0));
   }
+```
+
 It is very important that you do not manipulate the vertex position, as it will cause the quad to not be aligned with the TOP output. Also, notice how we declare our own output variable for the texture coordinate here. <code>vUV</code> will not be automatically available to us in the pixel shader if we supply a vertex shader, so we use this variable instead;
 
+```glsl
   layout (location = 0) out vec4 fragColor;
   in vec3 texCoord;
   void main()
   {
       fragColor = texture(sTD2DInputs[0], texCoord.st);
   }
+```
 
 ## Debugging Crashes
 
@@ -456,7 +503,6 @@ TouchDesigner will automatically put a #version statement at the start of the sh
 ## GLSL Matrix Functions
 
 From: https://docs.derivative.ca/GLSL_Matrix_Functions
-
 
 ```glsl
 // Creates a translation matrix for the given 3 translation values.
