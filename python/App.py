@@ -28,6 +28,9 @@ class App:
 
 	# other props
 	AUDIO_VOLUME = 'audio_volume'
+	AUDIO_ANALYSIS_DATA = 'audio_analysis_data'
+	SHOW_PIXEL_MAP = 'show_pixel_map'
+	BEAT_COUNT = 'beat_count'
 
 	# ===============================================
 	# Custom App Behavior
@@ -41,7 +44,16 @@ class App:
 		self.AddStoreListeners()
 		if op.AppStore.GetBoolean('is_production') == True:
 			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=1000)
+		self.SetInitialMode()
 		print("[App] Initialized!")
+
+	def SetInitialMode(self):
+		if op.AppStore.GetString(App.APP_STATE, "NONE") is not "NONE":
+			# Resume previous state in AppStore on startup
+			print(f"[App] Resetting current state: {self.CurState()}")
+			curState = self.CurState()
+			run(f"op('{self.ownerComp.path}').SetState('{curState}')", delayFrames=5)
+			return
 
 	def AddOpPaths(self):
 		op.AppStore.SetString(App.EMPTY_FRAME_TOP, op('/project1/constant_frame').path)
