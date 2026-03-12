@@ -1,3 +1,8 @@
+---
+name: td-ml
+description: Machine learning guidance for TouchDesigner projects. Use this when integrating ONNX, PyTorch, or model-driven workflows in TD.
+---
+
 # Machine Learning in TouchDesigner
 
 Guide to running ML models (ONNX, PyTorch, TensorFlow) inside TouchDesigner.

@@ -1,3 +1,8 @@
+---
+name: td-common-mistakes
+description: TouchDesigner Python mistake-and-correction reference. Use this to avoid common TD API, parameter, and callback mistakes.
+---
+
 # TouchDesigner Python — Common Mistakes
 
 Concrete mistake/correction pairs. Use this as an anti-hallucination reference when writing TD Python.

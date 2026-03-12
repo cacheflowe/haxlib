@@ -1,3 +1,8 @@
+---
+name: td-glsl-reference
+description: Reference examples and rules for TouchDesigner GLSL shader code. Use this when you need built-in conventions, shader structure, or TD-specific GLSL details.
+---
+
 # TouchDesigner GLSL Reference
 
 Best practices and reference for writing GLSL shaders in TouchDesigner.

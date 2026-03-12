@@ -1,3 +1,8 @@
+---
+name: td-python-style
+description: Style guide for TouchDesigner Python code. Use this when cleaning up naming, typing, structure, and readability in TD scripts.
+---
+
 # TouchDesigner Python Style Guide
 
 Coding conventions for Python in TouchDesigner projects.

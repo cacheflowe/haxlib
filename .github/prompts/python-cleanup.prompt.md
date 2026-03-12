@@ -1,3 +1,8 @@
+---
+name: Python Code Cleanup
+description: Clean up selected TouchDesigner Python code using the repository's Python style and API conventions.
+---
+
 # Python Code Cleanup
 
 Clean up and polish the selected Python code following TouchDesigner Python conventions.

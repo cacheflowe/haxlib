@@ -1,3 +1,8 @@
+---
+name: picocss-customization
+description: Guide for customizing Pico CSS variables and color schemes. Use this when updating theme variables or styling the web UI.
+---
+
 # Pico CSS Color Customization
 
 How to customize colors in a site that uses Pico CSS via CSS custom properties (variables).

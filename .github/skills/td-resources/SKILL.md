@@ -1,3 +1,8 @@
+---
+name: td-resources
+description: Curated TouchDesigner learning resources and references. Use this when looking for tutorials, documentation, and external TD materials.
+---
+
 # TouchDesigner Learning Resources
 
 Curated tutorials, channels, and reference material.

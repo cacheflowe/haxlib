@@ -1,3 +1,8 @@
+---
+name: td-extension-template
+description: Template and conventions for TouchDesigner COMP extensions. Use this when creating or refactoring extension classes with lifecycle and storage patterns.
+---
+
 # TouchDesigner Extension Template
 
 Complete template for creating Python extensions attached to COMPs, with proper initialization, storage, lifecycle callbacks, and cleanup.

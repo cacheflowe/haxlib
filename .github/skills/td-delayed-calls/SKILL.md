@@ -1,3 +1,8 @@
+---
+name: td-delayed-calls
+description: Patterns for scheduling delayed Python execution in TouchDesigner with run(). Use this when timing operations across frames or milliseconds.
+---
+
 # Delayed Function Calls in TouchDesigner
 
 Schedule Python code execution for a future time using `run()`. Essential for timing operations, sequencing events, and avoiding execution-order issues.

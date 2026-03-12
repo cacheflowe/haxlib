@@ -1,3 +1,8 @@
+---
+name: python-string-formatting
+description: Reference for Python string interpolation, padding, and numeric formatting. Use this when formatting strings, numbers, or filenames.
+---
+
 # Python String Formatting
 
 Learn essential string formatting techniques in Python, including interpolation, padding, and number formatting. These patterns are useful for creating formatted output, generating filenames, displaying data, and formatting numerical values.

@@ -1,3 +1,8 @@
+---
+name: td-python-patterns
+description: Task-oriented TouchDesigner Python patterns. Use this when working with operators, parameters, DATs, CHOPs, TOPs, storage, or timing.
+---
+
 # TouchDesigner Python Patterns
 
 Code patterns organized by task. All examples assume standard TD Python context (globals `td`, `op`, `me`, `parent`, `ui`, `absTime` are available).

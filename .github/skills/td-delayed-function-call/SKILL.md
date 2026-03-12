@@ -1,3 +1,8 @@
+---
+name: td-delayed-function-call
+description: Guide for delayed function calls in TouchDesigner. Use this when scheduling functions or DAT scripts with run().
+---
+
 # Delayed Function Calls in TouchDesigner
 
 Learn how to execute Python functions with delays in TouchDesigner using the `run()` command. This is essential for timing operations, sequencing events, and avoiding execution order issues.

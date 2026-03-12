@@ -1,3 +1,8 @@
+---
+name: td-wiring
+description: Programmatic node wiring patterns for TouchDesigner. Use this when connecting operators, managing inputs, or automating network wiring.
+---
+
 # TouchDesigner Node Wiring
 
 Programmatically connect (wire) operators using Python. Covers single and multi-input/output operators, COMP-level connections, and type hints for the relevant classes.

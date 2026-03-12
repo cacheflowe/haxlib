@@ -1,3 +1,8 @@
+---
+name: td-glsl
+description: TouchDesigner GLSL conventions and best practices. Use this when writing or adapting shaders for GLSL TOPs or materials.
+---
+
 # TouchDesigner GLSL Coding Skill
 
 This skill defines best practices for writing GLSL code within TouchDesigner projects.

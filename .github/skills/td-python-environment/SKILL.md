@@ -1,3 +1,8 @@
+---
+name: td-python-environment
+description: Environment setup for external Python modules in TouchDesigner. Use this when installing packages, configuring conda or venv, or managing sys.path.
+---
+
 # TouchDesigner Python Environment
 
 How to use external Python modules, manage environments, and import code in TouchDesigner.

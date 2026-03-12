@@ -1,3 +1,8 @@
+---
+name: td-threading
+description: Threading and background work patterns for TouchDesigner. Use this when offloading long-running work while keeping TD interactions on the main thread.
+---
+
 # Threading in TouchDesigner
 
 Patterns for running background work without blocking TD's main thread. Critical rule: **never access TD operators from a background thread**.

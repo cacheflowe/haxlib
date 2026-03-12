@@ -1,3 +1,8 @@
+---
+name: td-snippets
+description: Collection of small TouchDesigner Python snippets. Use this when you need quick utility examples or common one-off code patterns.
+---
+
 # TouchDesigner Python Snippets
 
 Small, reusable code patterns for common TD tasks.

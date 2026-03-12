@@ -1,3 +1,8 @@
+---
+name: td-oop
+description: Object-oriented design patterns for TouchDesigner. Use this when structuring COMPs, extensions, cloning, or reusable component architecture.
+---
+
 # OOP Architecture in TouchDesigner
 
 How object-oriented programming concepts map to TouchDesigner's node-based world.

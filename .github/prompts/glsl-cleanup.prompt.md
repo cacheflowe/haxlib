@@ -1,3 +1,8 @@
+---
+name: GLSL Code Cleanup
+description: Clean up selected TouchDesigner GLSL code using the repository's GLSL conventions and framework rules.
+---
+
 # GLSL Code Cleanup
 
 Clean up and polish the selected GLSL code following TouchDesigner GLSL conventions.
@@ -28,7 +33,6 @@ Use the guidelines defined in [SKILL.md](../skills/td-glsl/SKILL.md) for all con
 ### 4. Structure
 - Group uniforms and constants at the top.
 - Keep helper functions separate from `main()`.
-```
 
 ## Output
 

@@ -1,3 +1,8 @@
+---
+name: td-python
+description: General TouchDesigner Python guidance and API usage patterns. Use this when writing, reviewing, or debugging TD Python code.
+---
+
 # TouchDesigner Python Coding Skill
 
 This skill defines best practices for writing Python code within TouchDesigner projects.

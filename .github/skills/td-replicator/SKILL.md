@@ -1,3 +1,8 @@
+---
+name: td-replicator
+description: Replicator COMP patterns and callbacks for TouchDesigner. Use this when generating or updating replicants programmatically.
+---
+
 # Replicator Patterns in TouchDesigner
 
 The Replicator COMP creates multiple copies of a template operator based on a data source (typically a table DAT). Think of it as a `for` loop that creates operator instances.
