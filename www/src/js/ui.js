@@ -10,6 +10,7 @@ import "../css/client.css";
 
 // register web components
 // import ClientUI from "./client-ui.js";
+import WebRTCStream from "./webrtc-stream/webrtc-stream.js";
 
 class CustomApp extends HTMLElement {
   connectedCallback() {
