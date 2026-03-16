@@ -193,8 +193,8 @@ class MyExtension:
         # Access the owning component
         self.ownerComp.op('noise1').par.roughness = 0.5
 
-    def promoteMethod(self):
-        """Methods can be promoted to make them callable from outside."""
+    def PromoteMethod(self):
+        """Methods can be promoted to make them callable from outside, and must start with an uppercase letter."""
         pass
 
 # Accessing extensions

@@ -177,6 +177,11 @@ def process_data(self, data: dict) -> bool:
 
 ## Common Patterns
 
+### Importing Modules in a single line Expression
+```python
+__import__('json').dumps([])
+```
+
 ### Operator References
 ```python
 # By absolute path
@@ -185,6 +190,10 @@ my_op: OP = op('/project1/container1/my_op')
 # By relative path (from current op)
 child_op: OP = op('./child')
 sibling_op: OP = op('../sibling')
+
+# Selecting multiple ops with pattern
+children: List[OP] = op('./*')  # All children
+specific_children: List[OP] = op('./child*')  # Children starting with 'child'
 
 # Using shortcut (defined in component)
 app_store: AppStore = op.AppStore
