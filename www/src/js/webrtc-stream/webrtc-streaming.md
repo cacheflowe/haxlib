@@ -8,7 +8,6 @@ Streams a TouchDesigner output to one or more browser tabs via WebRTC, using the
 |---|---|
 | `WebRTCVideoOut.py` | TD Python extension — manages connections, drives signaling |
 | `webrtc-stream.js` | Browser web component — receives stream, renders video |
-| `webrtc.html` | Demo page |
 
 ---
 
@@ -83,13 +82,24 @@ Oversite uses the [TouchDesigner Signaling API](https://docs.derivative.ca/Palet
 
 ```
 Browser tab loads
-  └─ <webrtc-stream> storeIsReady():
-       └─ auto-generates webrtc-id attribute if absent (e.g. "webrtc_viewer_a3f2k")
-            └─ _store.set("webrtc_request", "webrtc_viewer_a3f2k", sendOnly=true)
-                 └─ WS → server → TD  (not stored, not re-broadcast to future clients)
+  └─ <webrtc-stream> connectedCallback():
+       └─ AppStore.checkStoreReady(this) — waits for store init
+
+storeIsReady() fires
+  └─ render() — inserts <video>, reconnect button, status indicator
+  └─ auto-generates webrtc-id attribute if absent (e.g. "webrtc_viewer_a3f2k")
+  └─ initPeerConnection() — creates RTCPeerConnection (no STUN/TURN config)
+  └─ registers listener for custom_json messages
+  └─ if WS already connected: _requestWebRTC()
+     else: waits for appstore_connected event, then _requestWebRTC()
+
+_requestWebRTC() (debounced — 300ms timer collapses rapid retriggers)
+  └─ _store.set("webrtc_request", "webrtc_viewer_a3f2k", sendOnly=true)
+       └─ WS → server → TD  (not stored, not re-broadcast to future clients)
 
 TD OnReceiveText: key="webrtc_request", value="webrtc_viewer_a3f2k", sender="tablet_ui"
   └─ Connect("webrtc_viewer_a3f2k", ws_sender="tablet_ui"):
+       closes existing connection for this viewer_id if any
        openConnection()        → new conn_id UUID
        addTrack(conn_id, 'video_track_1', 'video')
        createOffer(conn_id)    → triggers OnOffer callback
@@ -101,8 +111,12 @@ TD OnOffer fires
 
 Browser custom_json: signalingType="Offer", viewerId="webrtc_viewer_a3f2k"
   └─ viewerId matches this._viewerId → this component handles it
+       └─ if signalingState stuck or connectionState failed:
+            closeConnection() + initPeerConnection()  (fresh restart)
        └─ setRemoteDescription(offer sdp)
+            └─ flush any ICE candidates buffered before remote desc was set
             └─ createAnswer()
+                 └─ stale-PC guard: abort if a newer offer replaced this.pc
                  └─ setLocalDescription(answer)
                       └─ broadcastCustomJson → {signalingType:"Answer", viewerId:"webrtc_viewer_a3f2k"}
 
@@ -113,9 +127,16 @@ TD OnReceiveText: signalingType="Answer", viewerId="webrtc_viewer_a3f2k"
 ICE candidates exchange (both directions, concurrently with above)
   └─ TD OnIceCandidate → sendText (receiver="tablet_ui", viewerId="webrtc_viewer_a3f2k")
   └─ Browser onicecandidate → broadcastCustomJson {signalingType:"Ice", viewerId:"webrtc_viewer_a3f2k"}
+  └─ Browser skips its own ICE echoes reflected by the server (sender === _store.senderId)
+  └─ Browser buffers incoming ICE candidates if remote description isn't set yet
 
 ICE pair found → peer connection established → video flows
   └─ Browser ontrack fires → video element plays
+  └─ loadedmetadata sets aspect ratio from incoming video dimensions
+
+Connection failure
+  └─ onconnectionstatechange fires with state "failed"
+       └─ auto-retries by calling _requestWebRTC() for a fresh offer
 
 Tab closes / component removed
   └─ beforeunload + disconnectedCallback:
@@ -133,7 +154,9 @@ Each `<webrtc-stream>` component gets its own WebRTC peer connection. TD maintai
 - `connection_ws_senders`: `conn_id → ws_sender` — target address for routing Offer/ICE back to the browser
 - `connection_viewer_ids`: `conn_id → viewer_id` — echoed in outgoing Offer/ICE so the browser component can filter
 
-For video delivery, a **Replicator COMP** inside the Base COMP watches an `active_streams` Table DAT and spawns one VideoStreamOut TOP per connected viewer. Each replicated TOP's "WebRTC Connection" parameter is an expression that reads its connection ID from the table. The Replicator reacts to connection state changes — a row is added only when a connection reaches `connected`, ensuring the TOP isn't created before the peer connection is live.
+For video delivery, a **Replicator COMP** inside the Base COMP watches an `active_streams` Table DAT and spawns one VideoStreamOut TOP per connected viewer. Each replicated TOP's "WebRTC Connection" parameter is an expression that reads its connection ID from the table.
+
+> **Note:** The `active_streams` table and Replicator are part of the intended TD network setup but are **not managed by the Python extension**. The `onConnectionStateChange` callback is currently a no-op (`pass`). See the callbacks section below for the recommended hook to wire this up.
 
 ### Why `sendOnly: true` matters
 
@@ -238,11 +261,19 @@ If `webrtc-id` is omitted the component auto-generates one (`webrtc_viewer_<rand
 
 The component handles the full browser-side signaling flow, ICE candidate buffering, reconnection on failure, aspect ratio detection from the incoming stream, and rendering the video element.
 
+### Component UI
+
+The rendered component contains:
+
+- A `<video>` element (autoplay, playsinline, muted) — **mirrored horizontally** via `transform: scaleX(-1)`
+- A **reconnect button** (↺) in the bottom-right corner — calls `reconnect()` to tear down and re-establish the connection
+- A **status indicator** in the top-left corner — shows the `RTCPeerConnection.connectionState` (`waiting for stream…` → `connecting` → `connected` / `failed`), color-coded via `data-state` attribute
+
 ---
 
 ## Future development ideas
 
-- Do we need a list of connections, since the WebRTC DAT tracks them in a table?
+- Wire up `onConnectionStateChange` to manage the `active_streams` table and drive the Replicator automatically
 - How can we support multiple video tracks, depending on the incoming request? (e.g. "video_track_1" for 720p, "video_track_2" for 1080p)
 - How can we add audio tracks? (WebRTC supports this but it's outside the scope of the current use case)
 - Can we send video *in* to TouchDesigner using the same architecture? (e.g. for a remote webcam feed)

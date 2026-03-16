@@ -23,11 +23,14 @@ const METADATA = {
 
 class WebRTCStream extends HTMLElement {
   static NODE_NAME = "webrtc-stream";
-  static GLOBAL_CSS = true;
 
   /////////////////////////////////////////////////////////
   // Lifecycle
   /////////////////////////////////////////////////////////
+
+  get debug() {
+    return this.hasAttribute("debug");
+  }
 
   connectedCallback() {
     this.el = this;
@@ -35,35 +38,36 @@ class WebRTCStream extends HTMLElement {
   }
 
   disconnectedCallback() {
-    clearTimeout(this._requestTimer);
-    window.removeEventListener("beforeunload", this._onBeforeUnload);
+    clearTimeout(this.requestTimer);
+    window.removeEventListener("beforeunload", this.onBeforeUnload);
     _store.removeListener(this, "appstore_connected");
     _store.removeListener(this, "custom_json");
-    this._sendDisconnect();
+    this.sendDisconnect();
     this.closeConnection();
   }
 
-  _sendDisconnect() {
-    if (this._viewerId) _store.set("webrtc_disconnect", this._viewerId, /*broadcast*/true, /*receiverId*/null, /*sendOnly*/true);
+  sendDisconnect() {
+    if (this.viewerId)
+      _store.set("webrtc_disconnect", this.viewerId, /*broadcast*/ true, /*receiverId*/ null, /*sendOnly*/ true);
   }
 
   storeIsReady() {
     this.render();
     this.video = this.querySelector("video");
-    this.video.addEventListener("loadedmetadata", () => this._onVideoMetadata());
-    this._onBeforeUnload = () => this._sendDisconnect();
-    window.addEventListener("beforeunload", this._onBeforeUnload);
+    this.video.addEventListener("resize", () => this.onVideoMetadata());
+    this.onBeforeUnload = () => this.sendDisconnect();
+    window.addEventListener("beforeunload", this.onBeforeUnload);
     // Use the webrtc-id attribute if set; otherwise auto-generate a unique viewer ID
     // and persist it as an attribute so it's visible in the DOM and stable across reconnects
     if (!this.getAttribute("webrtc-id")) {
       this.setAttribute("webrtc-id", "webrtc_viewer_" + Math.random().toString(36).slice(2, 7));
     }
-    this._viewerId = this.getAttribute("webrtc-id");
+    this.viewerId = this.getAttribute("webrtc-id");
     this.initPeerConnection();
     _store.addListener(this, "custom_json");
     // SolidSocket connects asynchronously — wait for the WebSocket to be open before sending
     if (_store.isConnected()) {
-      this._requestWebRTC();
+      this.requestWebRTC();
     } else {
       _store.addListener(this, "appstore_connected");
     }
@@ -71,24 +75,99 @@ class WebRTCStream extends HTMLElement {
 
   appstore_connected() {
     _store.removeListener(this, "appstore_connected");
-    this._requestWebRTC();
+    this.requestWebRTC();
   }
 
-  _requestWebRTC() {
+  requestWebRTC() {
     // Debounce: collapse rapid retriggers (failed + reconnect arriving together)
-    clearTimeout(this._requestTimer);
-    this._requestTimer = setTimeout(() => {
+    clearTimeout(this.requestTimer);
+    this.requestTimer = setTimeout(() => {
       // sender = page's WS identity (for routing); value = this component's viewer ID
       // (TD echoes viewerId back in the Offer so the component can verify it's the right one)
-      _store.set("webrtc_request", this._viewerId, /*broadcast*/true, /*receiverId*/null, /*sendOnly*/true);
+      _store.set("webrtc_request", this.viewerId, /*broadcast*/ true, /*receiverId*/ null, /*sendOnly*/ true);
     }, 300);
   }
 
-  _onVideoMetadata() {
+  onVideoMetadata() {
     const { videoWidth, videoHeight } = this.video;
     if (videoWidth && videoHeight) {
       this.style.aspectRatio = `${videoWidth} / ${videoHeight}`;
     }
+    this.updateStatus();
+  }
+
+  startStatsPolling() {
+    this.stopStatsPolling();
+    this.statsInterval = setInterval(() => this.pollStats(), 1000);
+  }
+
+  stopStatsPolling() {
+    clearInterval(this.statsInterval);
+    this.statsInterval = null;
+    this.lastStats = null;
+  }
+
+  async pollStats() {
+    if (!this.pc || this.pc.connectionState !== "connected") return;
+    const stats = await this.pc.getStats();
+    const info = {};
+    stats.forEach((report) => {
+      if (report.type === "inbound-rtp" && report.kind === "video") {
+        info.fps = report.framesPerSecond;
+        info.framesReceived = report.framesReceived;
+        info.framesDecoded = report.framesDecoded;
+        info.framesDropped = report.framesDropped;
+        info.bytesReceived = report.bytesReceived;
+        info.packetsReceived = report.packetsReceived;
+        info.packetsLost = report.packetsLost;
+        info.jitter = report.jitter;
+        info.codecId = report.codecId;
+      }
+      if (report.type === "candidate-pair" && report.state === "succeeded") {
+        info.rtt = report.currentRoundTripTime;
+      }
+      if (report.type === "codec" && report.id === info.codecId) {
+        info.codec = report.mimeType?.replace("video/", "");
+      }
+    });
+    // second pass for codec if it appeared before inbound-rtp
+    if (info.codecId && !info.codec) {
+      stats.forEach((report) => {
+        if (report.type === "codec" && report.id === info.codecId) {
+          info.codec = report.mimeType?.replace("video/", "");
+        }
+      });
+    }
+    this.lastStats = info;
+    this.updateStatus();
+  }
+
+  updateStatus() {
+    const status = this.querySelector("#status");
+    if (!status) return;
+    const state = this.pc?.connectionState ?? "new";
+    if (state === "new") {
+      status.textContent = "waiting for stream…";
+      return;
+    }
+    const { videoWidth, videoHeight } = this.video || {};
+    const dims = videoWidth && videoHeight ? ` · ${videoWidth}×${videoHeight}` : "";
+    let text = `${state}${dims}`;
+    if (this.showStats && this.lastStats) {
+      const s = this.lastStats;
+      const lines = [];
+      if (s.fps != null) lines.push(`fps: ${s.fps}`);
+      if (s.codec) lines.push(`codec: ${s.codec}`);
+      if (s.rtt != null) lines.push(`rtt: ${(s.rtt * 1000).toFixed(0)}ms`);
+      if (s.jitter != null) lines.push(`jitter: ${(s.jitter * 1000).toFixed(1)}ms`);
+      if (s.packetsReceived != null) lines.push(`pkts: ${s.packetsReceived}`);
+      if (s.packetsLost != null) lines.push(`lost: ${s.packetsLost}`);
+      if (s.bytesReceived != null) lines.push(`recv: ${(s.bytesReceived / 1048576).toFixed(1)}MB`);
+      if (s.framesDecoded != null) lines.push(`decoded: ${s.framesDecoded}`);
+      if (s.framesDropped != null) lines.push(`dropped: ${s.framesDropped}`);
+      text += "\n" + lines.join("\n");
+    }
+    status.textContent = text;
   }
 
   /////////////////////////////////////////////////////////
@@ -124,19 +203,22 @@ class WebRTCStream extends HTMLElement {
     this.pc.onconnectionstatechange = () => {
       const state = this.pc.connectionState;
       this.dataset.state = state;
-      const status = this.querySelector("#status");
-      if (status) status.textContent = state;
-      console.log("WebRTCStream:", state);
+      this.updateStatus();
+      // restart stats polling if expanded and newly connected
+      if (state === "connected" && this.showStats) this.startStatsPolling();
+      else this.stopStatsPolling();
+      if (this.debug) console.log("WebRTCStream:", state);
       // auto-retry when ICE fails — ask TD for a fresh offer
-      if (state === "failed") this._requestWebRTC();
+      if (state === "failed") this.requestWebRTC();
     };
   }
 
   async custom_json(data) {
     if (!this.pc || !data.signalingType) return;
     // ignore signals not addressed to this component instance
-    if (data.viewerId && data.viewerId !== this._viewerId) return;
-    console.log("WebRTCStream: custom_json", data.signalingType, "pc:", this.pc?.signalingState ?? "none");
+    if (data.viewerId && data.viewerId !== this.viewerId) return;
+    if (this.debug)
+      console.log("WebRTCStream: custom_json", data.signalingType, "pc:", this.pc?.signalingState ?? "none");
     switch (data.signalingType) {
       case "Offer":
         await this.handleOffer(data);
@@ -144,10 +226,10 @@ class WebRTCStream extends HTMLElement {
       case "Ice":
         // ignore our own ICE echoes reflected by the server
         if (data.sender !== _store.senderId) {
-          console.log("WebRTCStream: ICE from", data.sender, data.content?.sdpCandidate?.slice(0, 60));
+          if (this.debug) console.log("WebRTCStream: ICE from", data.sender, data.content?.sdpCandidate?.slice(0, 60));
           await this.handleIce(data);
         } else {
-          console.log("WebRTCStream: skipping own ICE echo");
+          if (this.debug) console.log("WebRTCStream: skipping own ICE echo");
         }
         break;
       // "Answer" is ignored — browser is always the answerer, never the offerer.
@@ -165,23 +247,24 @@ class WebRTCStream extends HTMLElement {
         this.target = data.sender ?? null;
       }
       const pc = this.pc; // capture ref — avoids stale-PC issues if a concurrent offer restarts it
-      console.log("WebRTCStream: setting remote description (offer)");
+      if (this.debug) console.log("WebRTCStream: setting remote description (offer)");
       await pc.setRemoteDescription({ type: "offer", sdp: data.content.sdp });
       // flush any ICE candidates that arrived before the remote description was ready
       const flushed = this.iceBuffer.splice(0);
-      if (flushed.length) console.log("WebRTCStream: flushing", flushed.length, "buffered ICE candidates");
-      for (const c of flushed) await this._addIceCandidate(pc, c);
+      if (flushed.length && this.debug)
+        console.log("WebRTCStream: flushing", flushed.length, "buffered ICE candidates");
+      for (const c of flushed) await this.addIceCandidate(pc, c);
       const answer = await pc.createAnswer();
       if (pc !== this.pc) return; // aborted by a newer offer
       await pc.setLocalDescription(answer);
-      console.log("WebRTCStream: sent answer, ICE gathering state:", pc.iceGatheringState);
+      if (this.debug) console.log("WebRTCStream: sent answer, ICE gathering state:", pc.iceGatheringState);
       this.sendSignal({
         signalingType: "Answer",
         target: this.target,
         content: { sdp: pc.localDescription.sdp },
       });
     } catch (e) {
-      console.warn("WebRTCStream: handleOffer failed", e);
+      if (this.debug) console.warn("WebRTCStream: handleOffer failed", e);
     }
   }
 
@@ -191,29 +274,30 @@ class WebRTCStream extends HTMLElement {
       this.iceBuffer.push(content); // remote desc not set yet — buffer for later
       return;
     }
-    await this._addIceCandidate(this.pc, content);
+    await this.addIceCandidate(this.pc, content);
   }
 
-  async _addIceCandidate(pc, { sdpCandidate, sdpMLineIndex, sdpMid }) {
+  async addIceCandidate(pc, { sdpCandidate, sdpMLineIndex, sdpMid }) {
     try {
       await pc.addIceCandidate(new RTCIceCandidate({ candidate: sdpCandidate, sdpMLineIndex, sdpMid }));
     } catch (e) {
-      console.warn("WebRTCStream: failed to add ICE candidate", e);
+      if (this.debug) console.warn("WebRTCStream: failed to add ICE candidate", e);
     }
   }
 
   sendSignal(msg) {
-    _store.broadcastCustomJson({ metadata: METADATA, sender: _store.senderId, viewerId: this._viewerId, ...msg });
+    _store.broadcastCustomJson({ metadata: METADATA, sender: _store.senderId, viewerId: this.viewerId, ...msg });
   }
 
   reconnect() {
     this.closeConnection();
     if (this.video) this.video.srcObject = null;
     this.initPeerConnection();
-    this._requestWebRTC();
+    this.requestWebRTC();
   }
 
   closeConnection() {
+    this.stopStatsPolling();
     if (this.pc) {
       this.pc.close();
       this.pc = null;
@@ -262,8 +346,9 @@ class WebRTCStream extends HTMLElement {
       border-radius: 4px;
       background: rgba(0, 0, 0, 0.6);
       color: #888;
-      pointer-events: none;
+      cursor: pointer;
       user-select: none;
+      white-space: pre;
     }
     webrtc-stream[data-state="connecting"] #status { color: #fa0; }
     webrtc-stream[data-state="connected"] #status { color: #0f0; }
@@ -271,27 +356,28 @@ class WebRTCStream extends HTMLElement {
     webrtc-stream[data-state="failed"] #status { color: #f44; }
   `;
 
-  static addGlobalStyles() {
-    if (!WebRTCStream.GLOBAL_CSS) return;
-    const styleId = WebRTCStream.NODE_NAME + "-style";
-    if (document.getElementById(styleId)) return;
-    const style = document.createElement("style");
-    style.id = styleId;
-    style.textContent = WebRTCStream.css;
-    document.head.appendChild(style);
-  }
-
   html() {
     return /*html*/ `
       <video autoplay playsinline muted></video>
       <button id="reconnect" title="Reconnect">↺</button>
       <span id="status">waiting for stream…</span>
+      <style>${WebRTCStream.css}</style>
     `;
   }
 
   render() {
     this.el.innerHTML = this.html();
     this.querySelector("#reconnect").addEventListener("click", () => this.reconnect());
+    this.querySelector("#status").addEventListener("click", () => {
+      this.showStats = !this.showStats;
+      if (this.showStats && this.pc?.connectionState === "connected") {
+        this.pollStats(); // immediate first update
+        this.startStatsPolling();
+      } else {
+        this.stopStatsPolling();
+      }
+      this.updateStatus();
+    });
   }
 
   /////////////////////////////////////////////////////////
@@ -301,7 +387,6 @@ class WebRTCStream extends HTMLElement {
   static register() {
     if ("customElements" in window) {
       customElements.define(WebRTCStream.NODE_NAME, WebRTCStream);
-      WebRTCStream.addGlobalStyles();
     }
   }
 }
