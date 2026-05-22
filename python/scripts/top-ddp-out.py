@@ -1,0 +1,236 @@
+"""
+DDP Sender Script TOP
+=====================
+Reads pixels from the input TOP each frame and streams them to DDP LED
+controllers over UDP.
+
+Setup:
+  1. Wire your LED-resolution TOP into the Script TOP input
+  2. Press 'Setup Parameters' to create custom parameters
+  3. Set address/port — sender starts on first cook
+
+GPU tip: set the Script TOP resolution to Custom 1×1 (output is unused).
+Protocol reference: http://www.3waylabs.com/ddp/
+"""
+
+import socket
+import threading
+import time
+import numpy as np
+
+
+# ---------------------------------------------------------------------------
+# DDP constants
+# ---------------------------------------------------------------------------
+_MAX  = 480 * 3   # max bytes per packet
+_VER  = 0x40
+_PUSH = 0x01
+_RGB  = 0x0B
+
+
+# ---------------------------------------------------------------------------
+# DDP Sender
+# ---------------------------------------------------------------------------
+
+class DdpSender:
+	def __init__(self, address: str, port: int, dest_id: int,
+	             pixel_start: int, keepalive: float) -> None:
+		self.address     = address
+		self.port        = port
+		self.dest_id     = dest_id
+		self.pixel_start = pixel_start
+		self.keepalive   = keepalive
+
+		self._sock: socket.socket | None = None
+		self._seq        = 0
+		self._last_data: bytes | None = None
+		self._last_send  = 0.0
+		self._lock       = threading.Lock()
+		self._stop       = threading.Event()
+		self._thread: threading.Thread | None = None
+
+		self.frames_sent = 0
+		self.keepalive_sent = 0
+		self.packets_sent = 0
+		self.errors = 0
+
+	def start(self) -> None:
+		self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 1024 * 1024)
+		self._stop.clear()
+		self._thread = threading.Thread(
+			target=self._keepaliveLoop, daemon=True,
+			name=f"ddp-{self.address}:{self.port}",
+		)
+		self._thread.start()
+
+	def stop(self) -> None:
+		self._stop.set()
+		# No join — thread is daemon=True, exits on its own within keepalive interval
+		if self._sock:
+			self._sock.close()
+			self._sock = None
+
+	def sendFrame(self, rgb: bytes) -> None:
+		with self._lock:
+			if self._send(rgb):
+				self.frames_sent += 1
+				self._last_data = rgb
+				self._last_send = time.monotonic()
+				if self.frames_sent == 1:
+					print(f'[DDP] first frame sent → {self.address}:{self.port}  {len(rgb)} bytes')
+
+	def _send(self, data: bytes) -> bool:
+		if not self._sock:
+			return False
+		n     = len(data)
+		count = (n + _MAX - 1) // _MAX
+		base  = self.pixel_start * 3
+		ok    = True
+		for i in range(count):
+			off    = i * _MAX
+			ln     = min(_MAX, n - off)
+			absoff = base + off
+			self._seq = self._seq % 15 + 1
+			flags  = _VER | (_PUSH if i == count - 1 else 0)
+			hdr    = bytes([
+				flags, self._seq, _RGB, self.dest_id,
+				(absoff >> 24) & 0xFF, (absoff >> 16) & 0xFF,
+				(absoff >> 8)  & 0xFF,  absoff         & 0xFF,
+				(ln >> 8) & 0xFF, ln & 0xFF,
+			])
+			try:
+				self._sock.sendto(hdr + data[off:off + ln], (self.address, self.port))
+				self.packets_sent += 1
+			except OSError:
+				self.errors += 1
+				ok = False
+		return ok
+
+	def _keepaliveLoop(self) -> None:
+		while not self._stop.wait(timeout=self.keepalive):
+			with self._lock:
+				if self._last_data is None:
+					continue
+				if time.monotonic() - self._last_send < self.keepalive:
+					continue
+				if self._send(self._last_data):
+					self.keepalive_sent += 1
+					self._last_send = time.monotonic()
+
+
+# ---------------------------------------------------------------------------
+# Module-level sender registry.
+# _senderFor() validates thread liveness so a module reload (which wipes
+# this dict) triggers a clean reinit on the next cook.
+# ---------------------------------------------------------------------------
+_senders: dict = {}
+
+
+def _senderFor(op_id: int) -> 'DdpSender | None':
+	s = _senders.get(op_id)
+	if s is None or s._thread is None or not s._thread.is_alive():
+		return None
+	return s
+
+
+# ---------------------------------------------------------------------------
+# Script TOP callbacks
+# ---------------------------------------------------------------------------
+
+def onSetupParameters(scriptOp) -> None:
+	page = scriptOp.appendCustomPage('DDP')
+	page.appendToggle('Active', label='Active')[0].default = True
+	page.appendStr('Address', label='Address')[0].default = '127.0.0.1'
+	p = page.appendInt('Port', label='Port')[0]
+	p.default = 4048
+	p.min, p.max = 1, 65535
+	p = page.appendInt('Destinationid', label='Destination ID')[0]
+	p.default = 1
+	p.min, p.max = 1, 255
+	p = page.appendInt('Pixelstart', label='Pixel Start')[0]
+	p.default = 0
+	p.min = 0
+	p = page.appendFloat('Keepalive', label='Keepalive (s)')[0]
+	p.default = 0.1
+	p.min, p.max = 0.01, 2.0
+	page.appendPulse('Reinitialize', label='Reinitialize')
+	page.appendPulse('Printstats', label='Print Stats')
+
+
+def onPulse(par: Par) -> None:
+	op_id = par.owner.id
+	if par.name == 'Reinitialize':
+		s = _senders.get(op_id)
+		if s:
+			s.stop()
+		_senders[op_id] = _startSender(par.owner)
+	elif par.name == 'Printstats':
+		_printStats(par.owner)
+
+
+def onCook(scriptOp) -> None:
+	try:
+		op_id  = scriptOp.id
+		sender = _senderFor(op_id)
+
+		if sender is None or _configChanged(scriptOp, sender):
+			if sender is not None:
+				sender.stop()
+			sender = _startSender(scriptOp)
+			_senders[op_id] = sender
+
+		if not scriptOp.par.Active.eval() or not scriptOp.inputs:
+			return
+
+		inputTex = scriptOp.inputs[0]
+		raw = inputTex.numpyArray(delayed=True)
+		if raw is None:
+			return
+
+		if sender.frames_sent == 0:
+			print(f'[DDP] first raw frame: shape={raw.shape}  max={raw.max():.3f}  addr={sender.address}:{sender.port}')
+
+		rgb = (raw[:, :, :3] * 255.0).astype(np.uint8)
+		sender.sendFrame(rgb.tobytes())
+
+	except Exception as e:
+		print(f'[DDP] error: {e}')
+
+
+def onGetCookLevel(scriptOp) -> CookLevel:
+	return CookLevel.ALWAYS
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _configChanged(scriptOp, sender: DdpSender) -> bool:
+	return (
+		sender.address     != scriptOp.par.Address.eval()
+		or sender.port     != int(scriptOp.par.Port.eval())
+		or sender.dest_id  != int(scriptOp.par.Destinationid.eval())
+		or sender.pixel_start != int(scriptOp.par.Pixelstart.eval())
+	)
+
+
+def _startSender(scriptOp) -> DdpSender:
+	address  = scriptOp.par.Address.eval()
+	port     = int(scriptOp.par.Port.eval())
+	dest_id  = int(scriptOp.par.Destinationid.eval())
+	px_start = int(scriptOp.par.Pixelstart.eval())
+	keepalive = float(scriptOp.par.Keepalive.eval())
+	s = DdpSender(address, port, dest_id, px_start, keepalive)
+	s.start()
+	print(f'[DDP] Started → {address}:{port}')
+	return s
+
+
+def _printStats(scriptOp) -> None:
+	s = _senderFor(scriptOp.id)
+	if s is None:
+		print('[DDP] no active sender')
+		return
+	print(f'[DDP] {s.address}:{s.port}  frames={s.frames_sent}  '
+	      f'keepalives={s.keepalive_sent}  packets={s.packets_sent}  errors={s.errors}')
