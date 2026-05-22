@@ -77,8 +77,6 @@ class DdpSender:
 				self.frames_sent += 1
 				self._last_data = rgb
 				self._last_send = time.monotonic()
-				if self.frames_sent == 1:
-					print(f'[DDP] first frame sent → {self.address}:{self.port}  {len(rgb)} bytes')
 
 	def _send(self, data: bytes) -> bool:
 		if not self._sock:
@@ -127,13 +125,6 @@ class DdpSender:
 _senders: dict = {}
 
 
-def _senderFor(op_id: int) -> 'DdpSender | None':
-	s = _senders.get(op_id)
-	if s is None or s._thread is None or not s._thread.is_alive():
-		return None
-	return s
-
-
 # ---------------------------------------------------------------------------
 # Script TOP callbacks
 # ---------------------------------------------------------------------------
@@ -172,7 +163,9 @@ def onPulse(par: Par) -> None:
 def onCook(scriptOp) -> None:
 	try:
 		op_id  = scriptOp.id
-		sender = _senderFor(op_id)
+		sender = _senders.get(op_id)
+		if sender is not None and not sender._thread.is_alive():
+			sender = None
 
 		if sender is None or _configChanged(scriptOp, sender):
 			if sender is not None:
@@ -188,11 +181,10 @@ def onCook(scriptOp) -> None:
 		if raw is None:
 			return
 
-		if sender.frames_sent == 0:
-			print(f'[DDP] first raw frame: shape={raw.shape}  max={raw.max():.3f}  addr={sender.address}:{sender.port}')
-
 		rgb = (raw[:, :, :3] * 255.0).astype(np.uint8)
 		sender.sendFrame(rgb.tobytes())
+		if sender.frames_sent == 1:
+			print(f'[DDP] first frame sent → {sender.address}:{sender.port}  shape={raw.shape}')
 
 	except Exception as e:
 		print(f'[DDP] error: {e}')
@@ -212,6 +204,7 @@ def _configChanged(scriptOp, sender: DdpSender) -> bool:
 		or sender.port     != int(scriptOp.par.Port.eval())
 		or sender.dest_id  != int(scriptOp.par.Destinationid.eval())
 		or sender.pixel_start != int(scriptOp.par.Pixelstart.eval())
+		or sender.keepalive != float(scriptOp.par.Keepalive.eval())
 	)
 
 
@@ -228,8 +221,8 @@ def _startSender(scriptOp) -> DdpSender:
 
 
 def _printStats(scriptOp) -> None:
-	s = _senderFor(scriptOp.id)
-	if s is None:
+	s = _senders.get(scriptOp.id)
+	if s is None or not s._thread.is_alive():
 		print('[DDP] no active sender')
 		return
 	print(f'[DDP] {s.address}:{s.port}  frames={s.frames_sent}  '
