@@ -118,11 +118,11 @@ class DdpSender:
 
 
 # ---------------------------------------------------------------------------
-# Module-level sender registry.
-# _senderFor() validates thread liveness so a module reload (which wipes
-# this dict) triggers a clean reinit on the next cook.
+# Module-level sender instance.
+# Thread liveness check detects module reloads (which reset this to None)
+# and triggers a clean reinit on the next cook.
 # ---------------------------------------------------------------------------
-_senders: dict = {}
+_sender: DdpSender | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -145,53 +145,52 @@ def onSetupParameters(scriptOp) -> None:
 	p = page.appendFloat('Keepalive', label='Keepalive (s)')[0]
 	p.default = 0.1
 	p.min, p.max = 0.01, 2.0
+	page.appendToggle('Sendalways', label='Send Always')[0].default = True
 	page.appendPulse('Reinitialize', label='Reinitialize')
 	page.appendPulse('Printstats', label='Print Stats')
 
 
 def onPulse(par: Par) -> None:
-	op_id = par.owner.id
+	global _sender
 	if par.name == 'Reinitialize':
-		s = _senders.get(op_id)
-		if s:
-			s.stop()
-		_senders[op_id] = _startSender(par.owner)
+		if _sender:
+			_sender.stop()
+		_sender = _startSender(par.owner)
 	elif par.name == 'Printstats':
-		_printStats(par.owner)
+		_printStats()
 
 
 def onCook(scriptOp) -> None:
+	global _sender
 	try:
-		op_id  = scriptOp.id
-		sender = _senders.get(op_id)
-		if sender is not None and not sender._thread.is_alive():
-			sender = None
+		if _sender is None or not _sender._thread.is_alive():
+			_sender = None
 
-		if sender is None or _configChanged(scriptOp, sender):
-			if sender is not None:
-				sender.stop()
-			sender = _startSender(scriptOp)
-			_senders[op_id] = sender
+		if _sender is None or _configChanged(scriptOp, _sender):
+			if _sender is not None:
+				_sender.stop()
+			_sender = _startSender(scriptOp)
 
 		if not scriptOp.par.Active.eval() or not scriptOp.inputs:
 			return
 
 		inputTex = scriptOp.inputs[0]
 		raw = inputTex.numpyArray(delayed=True)
-		if raw is None:
-			return
 
 		rgb = (raw[:, :, :3] * 255.0).astype(np.uint8)
-		sender.sendFrame(rgb.tobytes())
-		if sender.frames_sent == 1:
-			print(f'[DDP] first frame sent → {sender.address}:{sender.port}  shape={raw.shape}')
+		_sender.sendFrame(rgb.tobytes())
+		if _sender.frames_sent == 1:
+			print(f'[DDP] first frame sent → {_sender.address}:{_sender.port}  shape={raw.shape}')
+
+		# draw to the TOP viewer
+		scriptOp.copyNumpyArray(raw)
 
 	except Exception as e:
 		print(f'[DDP] error: {e}')
 
 
 def onGetCookLevel(scriptOp) -> CookLevel:
-	return CookLevel.ALWAYS
+	return CookLevel.ALWAYS if scriptOp.par.Sendalways.eval() else CookLevel.AUTOMATIC
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +208,10 @@ def _configChanged(scriptOp, sender: DdpSender) -> bool:
 
 
 def _startSender(scriptOp) -> DdpSender:
-	address  = scriptOp.par.Address.eval()
-	port     = int(scriptOp.par.Port.eval())
-	dest_id  = int(scriptOp.par.Destinationid.eval())
-	px_start = int(scriptOp.par.Pixelstart.eval())
+	address   = scriptOp.par.Address.eval()
+	port      = int(scriptOp.par.Port.eval())
+	dest_id   = int(scriptOp.par.Destinationid.eval())
+	px_start  = int(scriptOp.par.Pixelstart.eval())
 	keepalive = float(scriptOp.par.Keepalive.eval())
 	s = DdpSender(address, port, dest_id, px_start, keepalive)
 	s.start()
@@ -220,10 +219,9 @@ def _startSender(scriptOp) -> DdpSender:
 	return s
 
 
-def _printStats(scriptOp) -> None:
-	s = _senders.get(scriptOp.id)
-	if s is None or not s._thread.is_alive():
+def _printStats() -> None:
+	if _sender is None or not _sender._thread.is_alive():
 		print('[DDP] no active sender')
 		return
-	print(f'[DDP] {s.address}:{s.port}  frames={s.frames_sent}  '
-	      f'keepalives={s.keepalive_sent}  packets={s.packets_sent}  errors={s.errors}')
+	print(f'[DDP] {_sender.address}:{_sender.port}  frames={_sender.frames_sent}  '
+	      f'keepalives={_sender.keepalive_sent}  packets={_sender.packets_sent}  errors={_sender.errors}')
