@@ -8,6 +8,7 @@ data/text/app-store.tsv
 
 # TDPyEnvManager
 *_vEnv/
+.venv/
 TDPyEnvManagerContext.json
 
 # Demos/WIP
@@ -24,3 +25,7 @@ python/_local_modules
 node_modules
 _modules
 logs/
+
+# Python
+__pycache__/
+*.pyc

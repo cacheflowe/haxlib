@@ -1,13 +1,13 @@
 import json
 
-def get_kv_prop(table, key):
+def get_kv_prop(table: tableDAT, key):
 	row = table.row(key)
 	if row != None:
 		return row[1]
 	else:
 		return None
 
-def set_kv_prop(table, key, value):
+def set_kv_prop(table: tableDAT, key, value):
 	row = table.row(key)
 	if row != None:
 		table.replaceRow(key, [key, value])
@@ -17,14 +17,14 @@ def set_kv_prop(table, key, value):
 		else:
 			table.appendRow([key, value], table.numRows - 1)
 
-def remove_kv_prop(table, key):
+def remove_kv_prop(table: tableDAT, key):
 	if table.row(key) != None:
 		table.deleteRow(key)
 
-def remove_all_rows(table):
+def remove_all_rows(table: tableDAT):
 	table.clear()
 
-def table_to_json(table):
+def table_to_json(table: tableDAT):
 	data = {}
 	for row in range(0, table.numRows):
 		# get data from table
@@ -45,5 +45,5 @@ def table_to_json(table):
 		data[key] = value
 	return data
 
-def table_to_json_str(table):
+def table_to_json_str(table: tableDAT):
 	return json.dumps(table_to_json(table))

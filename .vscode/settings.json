@@ -1,3 +1,17 @@
 {
-  "python.defaultInterpreterPath": "C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe"
+  "python.defaultInterpreterPath_BASIC": "C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe",
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/python/app",
+    "${workspaceFolder}/python/scripts",
+    "${workspaceFolder}/python/util",
+    "${workspaceFolder}/python/net",
+    "C:/Program Files/Derivative/TouchDesigner/bin/Lib/site-packages",
+    "C:/Program Files/Derivative/TouchDesigner/bin/Lib",
+    "C:/Program Files/Derivative/TouchDesigner/bin/Lib/tdi"
+  ],
+  "chat.tools.terminal.autoApprove": {
+    "ForEach-Object": true
+  },
+  "python-envs.defaultEnvManager": "ms-python.python:system"
 }

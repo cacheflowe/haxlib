@@ -1,5 +1,7 @@
 import sys
 import os
+import glob
+import importlib
 import platform
 import td
 
@@ -94,3 +96,30 @@ def StoreValueInStore(key, value):
 			td.op.AppStore.SetString(key, str(value))
 	else:
 		print("[Config] AppStore not available.")
+
+
+def ReloadModules():
+	tdTypes = {k: v for k, v in vars(td).items() if not k.startswith('_')}
+	reloaded = []
+	skipped = []
+	subdirs = ['python', 'python/util', 'python/extensions', 'python/net']
+	for subdir in subdirs:
+		for filepath in glob.glob(os.path.join(td.project.folder, subdir, '*.py')):
+			modName = os.path.splitext(os.path.basename(filepath))[0]
+			if modName.startswith('_') or modName in ('App', 'Bootstrap'):
+				continue
+			try:
+				if modName in sys.modules:
+					sys.modules[modName].__dict__.update(tdTypes)
+					importlib.reload(sys.modules[modName])
+					reloaded.append(modName)
+				else:
+					importlib.import_module(modName)
+					reloaded.append(modName)
+			except ModuleNotFoundError:
+				skipped.append(modName)
+			except Exception:
+				skipped.append(modName)
+	print(f'[Config] Reloaded: {reloaded}')
+	if skipped:
+		print(f'[Config] Skipped: {skipped}')

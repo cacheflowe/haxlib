@@ -1,6 +1,5 @@
 import td
 import os
-import sys
 
 def inspect_property(name, obj, verbose=False):
 	print(f"===============================")
@@ -31,17 +30,6 @@ def inspect_property(name, obj, verbose=False):
 	print(f"------- end inspection --------")
 	print(f"===============================")
 	return
-
-def print_python_path():
-	print("Python path:")
-	for path in sys.path:
-		print(" -", path)
-	return
-
-def add_to_python_path(path):
-	if path not in sys.path:
-		if os.path.exists(path):
-			sys.path.insert(0, path)
 
 def path_relative_to_project(path):
 	isString = isinstance(path, str)

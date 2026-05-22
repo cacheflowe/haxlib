@@ -1,0 +1,15 @@
+contextVersion: 2
+createdByVersion: 1.4.1
+active: true
+mode: Python vEnv
+envName: .venv
+installPath: .
+pythonVersion: '3.11'
+autoSetup: false
+autoSetupReqs: []
+autoSetupSyncReqs: false
+extraPaths:
+  - python/app
+  - python/scripts
+  - python/util
+  - python/net
