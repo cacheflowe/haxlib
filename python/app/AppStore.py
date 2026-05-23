@@ -1,11 +1,12 @@
 from __future__ import annotations
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+
 import json
 import threading
 import time
 import uuid
 import tdu # Import tdu for Dependency
 from subprocess import PIPE, STDOUT, Popen
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 class AppStore:
 	"""
@@ -183,15 +184,10 @@ class AppStore:
 		if key is None:
 			if listener not in self.listeners:
 				self.listeners.append(listener)
-				print(f"[AppStore] Added listener for *: {listener}")
 		elif hasattr(listener, f'On_{key}'):
 			keyListeners = self.listenersByKey.setdefault(key, [])
 			if listener not in keyListeners:
-				print(
-					f"[AppStore] Adding listener for key '{key}': {listener}")
 				keyListeners.append(listener)
-			else:
-				print(f"[AppStore] Listener already registered for key '{key}': {listener}")
 		else:
 			print(f"[AppStore] Listener missing required 'On_{key}' method: {listener}")
 
@@ -213,20 +209,30 @@ class AppStore:
 
 	def NotifyListeners(self, key: str, value: Any, valueType: Optional[str]) -> None:
 		"""Notify all relevant listeners of a value change."""
+		needsCleanup = False
 		for listener in self.listeners:
-			if hasattr(listener, 'OnAppStoreValueChanged'):
-				listener.OnAppStoreValueChanged(key, value, valueType)
-			else:
-				print(
-					f"[AppStore] Listener {listener} does not have OnAppStoreValueChanged method")
+			try:
+				if hasattr(listener, 'OnAppStoreValueChanged'):
+					listener.OnAppStoreValueChanged(key, value, valueType)
+				else:
+					print(f"[AppStore] Listener {listener} missing OnAppStoreValueChanged method")
+			except Exception as e:
+				print(f"[AppStore] Listener error (will clean up): {e}")
+				needsCleanup = True
 
 		for listener in self.listenersByKey.get(key, []):
 			callbackFn = f'On_{key}'
-			if hasattr(listener, callbackFn):
-				getattr(listener, callbackFn)(key, value, valueType)
-			else:
-				print(
-					f"[AppStore] Listener {listener} does not have {callbackFn} method for key: {key}")
+			try:
+				if hasattr(listener, callbackFn):
+					getattr(listener, callbackFn)(key, value, valueType)
+				else:
+					print(f"[AppStore] Listener {listener} missing {callbackFn} method for key: {key}")
+			except Exception as e:
+				print(f"[AppStore] Listener error for key '{key}' (will clean up): {e}")
+				needsCleanup = True
+
+		if needsCleanup:
+			self.cleanupDefunctListeners()
 
 	def cleanupDefunctListeners(self) -> None:
 		"""Remove old instances of listeners, keeping only the newest instance per ownerComp."""
