@@ -117,18 +117,18 @@ This does store into AppStore (via `StoreValueInStore`) — it is not automatic 
 
 ### .env type inference
 
-`config.LoadEnvFile()` infers types when storing to AppStore:
+`config.LoadEnvFile()` (via `StoreValueInStore`) infers types when storing to AppStore:
 
-```python
-"true" / "false"  → SetBoolean()
-"123"             → SetFloat()   (digits only)
-everything else   → SetString()
+```
+"true" / "false"      → SetBoolean()
+parses as float()     → SetFloat()    (handles negatives, decimals, scientific notation)
+leading-zero strings  → SetString()   ("0123" stays a string; "0" and "0.5" are numeric)
+everything else       → SetString()
 ```
 
 Gotchas:
-- `"yes"`, `"1"`, `"0"` are stored as **strings**, not booleans
-- `"123abc"` is stored as a **string**, not a number
-- `.env` loading **overwrites** persisted values — environment config takes precedence
+- `"yes"`, `"on"`, `"1"`, `"0"` are stored as strings or numbers, **not booleans**. Use `GetBoolean()` to coerce — it accepts `"true"`, `"1"`, and `"1.0"` as True.
+- `.env` loading **overwrites** persisted values — environment config takes precedence (logged via `(overwriting existing key: ...)`)
 
 ---
 

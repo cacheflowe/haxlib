@@ -148,7 +148,7 @@ All values are stored as strings in the table but accessed through typed getters
 | String | `TYPE_STRING` | `SetString(key, 'hello')` | `GetString(key, default='')` | `"hello"` |
 | Boolean | `TYPE_BOOLEAN` | `SetBoolean(key, True)` | `GetBoolean(key, default=False)` | `"True"` |
 
-`GetBoolean` treats the string `"true"` (case-insensitive) as True, everything else as False.
+`GetBoolean` accepts `"true"`, `"1"`, or `"1.0"` (case-insensitive) as True — matches TD's convention that 0/1 is interchangeable with False/True. Anything else is False.
 
 `GetFloat` returns the default if the stored value can't be parsed as a float.
 
@@ -262,7 +262,7 @@ The COMP color indicates connection state: yellow = disconnected, green = connec
 | `HasValue(key)` | `bool` | Checks dependency cache |
 | `GetFloat(key, default=0.0)` | `float` | Returns default on missing key or parse error |
 | `GetString(key, default='')` | `str` | Reading triggers tdu.Dependency reactivity |
-| `GetBoolean(key, default=False)` | `bool` | Only `"true"` (case-insensitive) is True |
+| `GetBoolean(key, default=False)` | `bool` | True for `"true"`, `"1"`, `"1.0"` (case-insensitive) |
 | `GetStoreDat()` | `DAT` | Direct access to storeTable |
 | `GetStoreChop()` | `CHOP` | Direct access to numeric CHOP |
 

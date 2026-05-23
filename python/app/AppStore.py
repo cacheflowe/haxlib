@@ -109,10 +109,14 @@ class AppStore:
 		return default
 
 	def GetBoolean(self, key: str, default: bool = False) -> bool:
-		"""Get a boolean value from the store."""
+		"""Get a boolean value from the store.
+
+		Accepts 'true', '1', and '1.0' (case-insensitive) as True — matches TD's
+		convention that 0/1 is interchangeable with False/True. Anything else is False.
+		"""
 		if key in self.dependencies:
-			val = str(self.dependencies[key].val)
-			return val.lower() == 'true'
+			val = str(self.dependencies[key].val).strip().lower()
+			return val in ('true', '1', '1.0')
 		return default
 
 	###################################################
@@ -395,12 +399,21 @@ class AppStore:
 
 	def MessageReceived(self, dat: tableDAT, rowIndex: int, message: str) -> None:
 		"""Handle incoming WebSocket message."""
-		data = json.loads(message)
+		try:
+			data = json.loads(message)
+		except (json.JSONDecodeError, TypeError) as e:
+			preview = (message[:120] + '…') if isinstance(message, str) and len(message) > 120 else message
+			print(f"[AppStore] Ignoring malformed WebSocket message: {e} | payload: {preview!r}")
+			return
 
 		if data.get('store') == True:
-			key = data['key']
-			value = data['value']
-			valueType = data['type']
+			try:
+				key = data['key']
+				value = data['value']
+				valueType = data['type']
+			except KeyError as e:
+				print(f"[AppStore] Store message missing required field {e}: {data!r}")
+				return
 			sender = data.get('sender', '')
 			self.SetValue(key, value, valueType, sender, False)
 		else:
