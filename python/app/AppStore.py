@@ -24,7 +24,7 @@ class AppStore:
 	TYPE_STRING = 'string'
 	TYPE_BOOLEAN = 'boolean'
 
-	DISCONNECT_WARNING_INTERVAL = 60  # seconds between disconnect warnings when broadcasting while disconnected
+	DISCONNECT_BANNER = "=" * 60
 
 	def __init__(self, ownerComp: baseCOMP) -> None:
 		AppStore.i = self
@@ -39,7 +39,7 @@ class AppStore:
 		self.listenersByKey: Dict[str, List[Any]] = {}
 		self._suppressNotify: bool = False
 		self._pendingKeys: Dict[str, Optional[str]] = {}  # key → valueType, flushed at frame end
-		self._lastDisconnectWarning: float = 0.0  # rate-limit disconnect warnings
+		self._disconnectedFallbacks: Dict[str, int] = {}  # key → count of fallback writes during current outage
 
 	def initStore(self) -> None:
 		"""Initialize internal operator references."""
@@ -136,11 +136,8 @@ class AppStore:
 			return
 
 		if broadcast:
-			# Disconnected — log occasionally, then fall through to local update
-			now = time.time()
-			if now - self._lastDisconnectWarning > self.DISCONNECT_WARNING_INTERVAL:
-				print(f"[AppStore] WebSocket disconnected — falling back to local update for '{key}'")
-				self._lastDisconnectWarning = now
+			# Disconnected — track fallback for the next connection-restore summary
+			self._disconnectedFallbacks[key] = self._disconnectedFallbacks.get(key, 0) + 1
 
 		# Local update (either broadcast=False, or disconnected fallback)
 		isNew = key not in self.dependencies
@@ -370,9 +367,21 @@ class AppStore:
 
 	def initWebSocket(self) -> None:
 		"""Initialize WebSocket connection state."""
+		self._startupConnectionLogged: bool = False
 		self.setIsConnected(False)
 		self.setColor(1, 1, 0)
 		self.CheckSocketReconnect()
+		# Grace period for the websocket to connect. If still disconnected after this,
+		# log the disconnect banner so startup-with-no-server is visible.
+		run("args[0]._startupConnectionCheck()", self, delayMilliSeconds=2000)
+
+	def _startupConnectionCheck(self) -> None:
+		"""Fires once, 2s after init, to log if we started up disconnected."""
+		if self._startupConnectionLogged:
+			return
+		self._startupConnectionLogged = True
+		if not self.IsConnected():
+			self._logConnectionLost()
 
 	def StartWebServer(self) -> None:
 		"""Start the web server if not already connected."""
@@ -420,13 +429,41 @@ class AppStore:
 
 	def SocketConnected(self, websocketDat: websocketDAT) -> None:
 		"""Handle WebSocket connection event."""
+		if self.IsConnected():
+			return  # ignore duplicate state event
 		self.setIsConnected(True)
 		self.setColor(0, 1, 0)
+		self._logConnectionRestored()
+		self._disconnectedFallbacks.clear()
+		self._startupConnectionLogged = True  # suppress deferred startup check
 
 	def SocketDisconnected(self, websocketDat: websocketDAT) -> None:
 		"""Handle WebSocket disconnection event."""
+		if not self.IsConnected():
+			return  # ignore duplicate state event
 		self.setIsConnected(False)
 		self.setColor(1, 1, 0)
+		self._logConnectionLost()
+		self._startupConnectionLogged = True  # suppress deferred startup check
+
+	def _logConnectionLost(self) -> None:
+		print(self.DISCONNECT_BANNER)
+		print("[AppStore] WebSocket DISCONNECTED")
+		print("           broadcast=True writes will fall back to local updates")
+		print(self.DISCONNECT_BANNER)
+
+	def _logConnectionRestored(self) -> None:
+		print(self.DISCONNECT_BANNER)
+		print("[AppStore] WebSocket RECONNECTED")
+		if self._disconnectedFallbacks:
+			total = sum(self._disconnectedFallbacks.values())
+			distinct = len(self._disconnectedFallbacks)
+			print(f"           {total} broadcast write(s) across {distinct} key(s) handled locally during outage:")
+			for k, count in self._disconnectedFallbacks.items():
+				print(f"             - {k}: {count}x")
+		else:
+			print("           no broadcast writes attempted during outage")
+		print(self.DISCONNECT_BANNER)
 
 	def MessageReceived(self, dat: tableDAT, rowIndex: int, message: str) -> None:
 		"""Handle incoming WebSocket message."""

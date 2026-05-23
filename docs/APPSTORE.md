@@ -219,9 +219,11 @@ Behavior depends on connection state:
 | Connection | Behavior |
 |------------|----------|
 | Connected | Sends over the wire, **does NOT update local state**. Waits for the server echo via `MessageReceived` to update locally. |
-| Disconnected | Falls back to a local-only update so the app keeps working offline. |
+| Disconnected | Falls back to a local-only update so the app keeps working offline. The key + write count is tracked silently. |
 
 This connectivity check is centralized inside `SetValue()` — callers don't need to call `IsConnected()` themselves.
+
+A single multiline banner is printed on each connection toggle (disconnect, then reconnect). The reconnect banner includes a summary of broadcast writes that fell back to local during the outage — so a flood of fallback writes produces one log block, not one line per write.
 
 ### Wire format
 
