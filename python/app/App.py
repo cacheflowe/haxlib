@@ -60,6 +60,7 @@ class App:
 		print("[App] Initializing...")
 		print("[App] =============================")
 		self.Bootstrap()
+		self.VerifyBootstrap()
 		self.AddOpPaths()
 		self.ResizeExtensionNodes()
 		self.AddStoreListeners()
@@ -69,11 +70,23 @@ class App:
 		print("[App] Initialized!")
 
 	def Bootstrap(self):
+		# Load order: defaults (lowest) → persisted file → .env → shell env → hard-coded (highest)
+		print("[App] Bootstrap: 1/3 SetDefaults(force=True)")
+		self.AppStore.SetDefaults(force=True)
+		print("[App] Bootstrap: 2/3 LoadFile()")
 		self.AppStore.LoadFile()
+		print("[App] Bootstrap: 3/3 LoadEnvFile()")
 		config.LoadEnvFile(os.path.join(project.folder, '.env'))
-		self.AppStore.par.Applydefaults.pulse()
-		td.reloadModules = config.ReloadModules # make global reload function available for dev use
+		td.reloadModules = config.ReloadModules
 
+	def VerifyBootstrap(self):
+		# Temporary: confirm precedence is working. Remove after testing.
+		print("[App] ---- Bootstrap Verification ----")
+		print(f"[App]   is_production = {self.AppStore.GetBoolean('is_production')}")
+		print(f"[App]   app_w = {self.AppStore.GetFloat('app_w')}")
+		print(f"[App]   app_h = {self.AppStore.GetFloat('app_h')}")
+		print(f"[App]   Total keys in store: {self.AppStore.GetStoreDat().numRows}")
+		print("[App] ---- End Verification ----")
 
 	def RegisterSingletons(self) -> None:
 		App.i = config.register_singleton(self, 'App')
@@ -81,11 +94,10 @@ class App:
 		# Add future global extensions here: Colors.i = config.register_singleton(op.Colors.ext.Colors, 'Colors')
 
 	def SetInitialMode(self):
-		if self.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
-			# Resume previous state in AppStore on startup
-			print(f"[App] Resetting current state: {self.CurState()}")
-			curState = self.CurState()
-			run(f"op('{self.ownerComp.path}').SetState('{curState}')", delayFrames=5)
+		curState = self.CurState()
+		if curState and curState != "NONE":
+			print(f"[App] Resuming state: {curState}")
+			run(f"args[0].SetState(args[1])", self, curState, delayFrames=5)
 			return
 
 	def AddOpPaths(self):

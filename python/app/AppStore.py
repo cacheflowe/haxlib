@@ -118,13 +118,16 @@ class AppStore:
 		if broadcast:
 			self.broadcastValue(key, value, valueType)
 		else:
+			# Check if value actually changed
+			isNew = key not in self.dependencies
+			oldValue = None if isNew else self.dependencies[key].val
+			changed = isNew or str(oldValue) != str(value)
+
 			# Update granular dependency (triggers cooks only for listeners of this key)
-			if key not in self.dependencies:
+			if isNew:
 				self.dependencies[key] = tdu.Dependency(value)
 			else:
 				self.dependencies[key].val = value
-				# Force Modified logic if value is same? 
-				# tdu.Dependency usually handles equality check, use .modified() if you need to force
 
 			# Update Table (triggers cooks for anyone watching the whole table)
 			eventId = self.newEventId()
@@ -136,7 +139,9 @@ class AppStore:
 			else:
 				self.storeTable.appendRow(
 					[key, value, valueType, sender, eventId])
-			self.NotifyListeners(key, value, valueType)
+
+			if changed:
+				self.NotifyListeners(key, value, valueType)
 
 	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:
 		"""Set a numeric value in the store."""
@@ -185,8 +190,10 @@ class AppStore:
 				print(
 					f"[AppStore] Adding listener for key '{key}': {listener}")
 				keyListeners.append(listener)
+			else:
+				print(f"[AppStore] Listener already registered for key '{key}': {listener}")
 		else:
-			print(f"[AppStore] Listener already exists: {listener}")
+			print(f"[AppStore] Listener missing required 'On_{key}' method: {listener}")
 
 		self.cleanupDefunctListeners()
 
@@ -426,13 +433,24 @@ class AppStore:
 			self.storeTable.save(filePath, createFolders=True)
 
 	def LoadFile(self) -> None:
-		"""Load the store from a backup file."""
+		"""Load the store from a backup file, merging values into existing state."""
 		filePath = self.ownerComp.par.Backupfile.eval()
-		if filePath:
-			print(f'[AppStore] LoadFile: {filePath}')
-			self.fileInTable.par.refreshpulse.pulse()
-			self.storeTable.copy(self.fileInTable)
-			self.SyncFromTable() # Refresh granular dependencies from the loaded table
+		if not filePath:
+			print('[AppStore] LoadFile: no Backupfile path configured, skipping')
+			return
+		import os
+		if not os.path.exists(filePath):
+			print(f'[AppStore] LoadFile: file not found at {filePath}, skipping')
+			return
+		print(f'[AppStore] LoadFile: {filePath}')
+		self.fileInTable.par.refreshpulse.pulse()
+		for row in self.fileInTable.rows():
+			if len(row) >= 3:
+				key = row[0].val
+				value = row[1].val
+				valueType = row[2].val
+				sender = row[3].val if len(row) > 3 else ''
+				self.SetValue(key, value, valueType, sender, False)
 
 	###################################################
 	# Debug

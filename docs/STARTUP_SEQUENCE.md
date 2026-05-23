@@ -74,13 +74,14 @@ AppStore.i = config.register_singleton(op.AppStore.ext.AppStore, 'AppStore')
 
 #### Bootstrap() — the configuration loading sequence
 
-This is where all configuration sources are merged into AppStore:
+This is where all configuration sources are merged into AppStore. Later sources overwrite earlier ones for matching keys:
 
 ```python
 def Bootstrap(self):
-    self.AppStore.LoadFile()                              # 1. persisted values
-    config.LoadEnvFile(os.path.join(project.folder, '.env'))  # 2. .env file
-    self.AppStore.par.Applydefaults.pulse()               # 3. defaults table
+    # Load order: defaults (lowest) → persisted file → .env → shell env → hard-coded (highest)
+    self.AppStore.SetDefaults(force=True)
+    self.AppStore.LoadFile()
+    config.LoadEnvFile(os.path.join(project.folder, '.env'))
     td.reloadModules = config.ReloadModules
 ```
 
@@ -93,16 +94,16 @@ All configuration ends up in AppStore. There are two levels of persistence befor
 - **`.toe` file** — TD saves DAT table contents in the project file. The `storeTable` already has values from the last project save when AppStore initializes.
 - **TSV backup file** — a separate on-disk backup written by `AppStore.SaveFile()`, loaded explicitly in Bootstrap.
 
-Sources then load in this order during `Bootstrap()`:
+Sources load in this order during `Bootstrap()` — each layer overwrites the previous for matching keys:
 
 | Order | Source | Method | Notes |
 |-------|--------|--------|-------|
 | 0 | `.toe` project file | (automatic, TD) | storeTable contents from last project save |
-| 1 | TSV backup file | `AppStore.LoadFile()` | Overwrites .toe table with last runtime state |
-| 2 | `.env` file | `config.LoadEnvFile()` | Overwrites persisted values for matching keys |
-| 3 | Defaults table | `AppStore.SetDefaults()` | Only sets keys not already present (`force=False`) |
+| 1 | Defaults table | `AppStore.SetDefaults(force=True)` | Overwrites .toe values — establishes baseline |
+| 2 | TSV backup file | `AppStore.LoadFile()` | Merges persisted runtime state (row-by-row) |
+| 3 | `.env` file | `config.LoadEnvFile()` | Overwrites for environment-specific config |
 
-**Result:** runtime state from TSV wins over stale .toe values; `.env` overrides both for environment-specific config; defaults fill in anything missing.
+**Result:** defaults establish baseline over stale .toe values; persisted file restores last runtime state; `.env` overrides everything for environment-specific config. Hard-coded values set after Bootstrap (e.g. in `AddOpPaths()`) have the highest precedence.
 
 ### Shell / OS environment variables
 
@@ -149,39 +150,46 @@ AppStore maintains three parallel representations of state:
 
 During `Bootstrap()`, a key can be written up to three times in one frame:
 
-1. `LoadFile()` → restores persisted value
-2. `LoadEnvFile()` → overwrites with .env value (if key present)
-3. `SetDefaults()` → skipped if key already exists (`force=False`)
+1. `SetDefaults(force=True)` → sets baseline value
+2. `LoadFile()` → overwrites with persisted value (if key present in backup)
+3. `LoadEnvFile()` → overwrites with .env value (if key present)
 
-Each `SetValue()` call updates the dependency, the table, generates a new `eventId`, and fires `NotifyListeners()`. If any listeners are registered by Bootstrap time (unlikely but possible), they will receive multiple callbacks for the same key in a single frame with no batching.
+Each `SetValue()` call updates the dependency and the table, but `NotifyListeners()` is only called when the value actually changes (string equality check). This means redundant writes (e.g. .env sets the same value as the persisted file) do not trigger extra listener callbacks.
 
-**Risk:** anything downstream that reacts to AppStore values during init may cook multiple times or receive intermediate values.
+**Remaining risk:** if listeners are registered before Bootstrap completes (unlikely but possible), they may receive multiple callbacks for the same key within a single frame — once per layer that changes the value.
 
 ### tdu.Dependency equality check
 
-`tdu.Dependency` may not fire a cook if the new value equals the existing value. The comment in `SetValue()` acknowledges this:
+`tdu.Dependency` may not fire a cook if the new value equals the existing value. `SetValue()` now performs its own string equality check before calling `NotifyListeners()`:
 
 ```python
-# Force Modified logic if value is same?
-# tdu.Dependency usually handles equality check, use .modified() if you need to force
+changed = isNew or str(oldValue) != str(value)
+if changed:
+    self.NotifyListeners(key, value, valueType)
 ```
 
-If `.env` reloads the same value that was persisted, the dependency update may be a no-op — but `NotifyListeners()` is still called unconditionally. Listeners will be notified even when the value hasn't changed.
+This means listeners are only notified when the value actually changes, regardless of how `tdu.Dependency` handles the cook internally.
 
-### LoadFile() silent failures
+### LoadFile() merge behavior
 
 ```python
 def LoadFile(self):
     filePath = self.ownerComp.par.Backupfile.eval()
-    if filePath:
-        self.fileInTable.par.refreshpulse.pulse()
-        self.storeTable.copy(self.fileInTable)
-        self.SyncFromTable()
+    if not filePath:
+        print('[AppStore] LoadFile: no Backupfile path configured, skipping')
+        return
+    if not os.path.exists(filePath):
+        print(f'[AppStore] LoadFile: file not found at {filePath}, skipping')
+        return
+    self.fileInTable.par.refreshpulse.pulse()
+    for row in self.fileInTable.rows():
+        ...
+        self.SetValue(key, value, valueType, sender, False)
 ```
 
-- If `Backupfile` parameter is empty → silently does nothing
-- If the file doesn't exist → `filein_backup` loads nothing, `storeTable` may be cleared
-- No error logging if the file is missing or malformed
+- Logs explicitly when path is missing or file not found (previously silent)
+- Uses row-by-row merge via `SetValue()` instead of `storeTable.copy()` — preserves values from earlier layers (defaults) for keys not present in the backup file
+- Each merged value goes through the same equality check as any other `SetValue()` call
 
 ### SaveFile() early-startup guard
 
@@ -198,16 +206,16 @@ Saves are silently skipped for the first 5 seconds. If something triggers a save
 
 `self.dependencies` is only synced from the table during `initDependencies()` and `LoadFile()`. If the `storeTable` DAT is modified directly (e.g. by a TD node, not via `SetValue()`), the dependency cache becomes stale. `GetFloat` / `GetString` / `GetBoolean` all read from `self.dependencies`, not the table.
 
-### Listener logic bug in AddListener()
+### Listener logic in AddListener()
 
 ```python
 elif hasattr(listener, f'On_{key}'):
     # adds to key listeners
 else:
-    print(f"[AppStore] Listener already exists: {listener}")
+    print(f"[AppStore] Listener missing required 'On_{key}' method: {listener}")
 ```
 
-The `else` branch fires when the listener does **not** have the required `On_{key}` method — but the print message says "already exists", which is misleading. The listener is silently not registered with no useful error.
+The `else` branch fires when the listener does **not** have the required `On_{key}` method. The listener is not registered and an informative message is printed.
 
 ### cleanupDefunctListeners() only runs on AddListener()
 
@@ -226,10 +234,9 @@ if self.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
 
 ---
 
-## Recommendations
+## Recommendations (remaining)
 
-- **Add logging to LoadFile()** — at minimum print a warning if the backup file is missing
 - **Batch AppStore writes during init** — consider a flag that suppresses `NotifyListeners()` during Bootstrap and fires one notification pass after all sources are loaded
-- **Fix the AddListener() else branch** — log the real reason (missing method) not "already exists"
 - **Validate curState** before the `run()` string in `SetInitialMode()`
-- **Consider a `force=True` variant of LoadEnvFile()** with explicit logging when .env overwrites a persisted value — currently silent
+- **Consider explicit logging when .env overwrites a persisted value** — currently silent
+- **Add periodic cleanup of defunct listeners** — currently only runs on `AddListener()`
