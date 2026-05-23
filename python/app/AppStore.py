@@ -36,6 +36,7 @@ class AppStore:
 		self.listeners: List[Any] = []
 		self.listenersByKey: Dict[str, List[Any]] = {}
 		self._suppressNotify: bool = False
+		self._pendingKeys: Dict[str, Optional[str]] = {}  # key → valueType, flushed at frame end
 
 	def initStore(self) -> None:
 		"""Initialize internal operator references."""
@@ -143,7 +144,7 @@ class AppStore:
 					[key, value, valueType, sender, eventId])
 
 			if changed and not self._suppressNotify:
-				self.NotifyListeners(key, value, valueType)
+				self._pendingKeys[key] = valueType
 
 	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:
 		"""Set a numeric value in the store."""
@@ -234,6 +235,16 @@ class AppStore:
 
 		if needsCleanup:
 			self.cleanupDefunctListeners()
+
+	def FlushNotifications(self) -> None:
+		"""Flush pending notifications at end of frame. Called by Execute DAT."""
+		if not self._pendingKeys:
+			return
+		keys = dict(self._pendingKeys)
+		self._pendingKeys.clear()
+		for key, valueType in keys.items():
+			value = self.dependencies[key].val if key in self.dependencies else None
+			self.NotifyListeners(key, value, valueType)
 
 	def cleanupDefunctListeners(self) -> None:
 		"""Remove old instances of listeners, keeping only the newest instance per ownerComp."""
