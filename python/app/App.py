@@ -76,14 +76,23 @@ class App:
 		# Load order: defaults (lowest) → persisted file → .env → shell env → hard-coded (highest)
 		# Suppress listener notifications until all layers are loaded
 		op.AppStore.ext.AppStore._suppressNotify = True
-		print("[App] Bootstrap: 1/3 SetDefaults(force=True)")
+		print("[App] Bootstrap: 1/4 SetDefaults(force=True)")
 		self.AppStore.SetDefaults(force=True)
-		print("[App] Bootstrap: 2/3 LoadFile()")
+		print("[App] Bootstrap: 2/4 LoadFile()")
 		self.AppStore.LoadFile()
-		print("[App] Bootstrap: 3/3 LoadEnvFile()")
+		print("[App] Bootstrap: 3/4 LoadEnvFile()")
 		config.LoadEnvFile(os.path.join(project.folder, '.env'))
+		print("[App] Bootstrap: 4/4 LoadSystemEnvVars()")
+		self.LoadSystemEnvVars()
 		op.AppStore.ext.AppStore._suppressNotify = False
 		td.reloadModules = config.ReloadModules
+
+	def LoadSystemEnvVars(self):
+		"""Load OS-level environment variables that may have been set by the launching script
+		(e.g. scripts/run-td-app-plus-env-var.cmd). Each call falls back to the default value
+		if the OS env var is not set. Add project-specific keys here.
+		"""
+		config.LoadSystemEnvironmentVar('sys_env_var', 'Default Value')
 
 	def VerifyBootstrap(self):
 		# Temporary: confirm precedence is working. Remove after testing.

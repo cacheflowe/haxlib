@@ -82,7 +82,12 @@ def Bootstrap(self):
     self.AppStore.SetDefaults(force=True)
     self.AppStore.LoadFile()
     config.LoadEnvFile(os.path.join(project.folder, '.env'))
+    self.LoadSystemEnvVars()
     td.reloadModules = config.ReloadModules
+
+def LoadSystemEnvVars(self):
+    # Project-specific OS env var imports (set by the launching script, with defaults)
+    config.LoadSystemEnvironmentVar('sys_env_var', 'Default Value')
 ```
 
 ---
@@ -102,18 +107,19 @@ Sources load in this order during `Bootstrap()` — each layer overwrites the pr
 | 1 | Defaults table | `AppStore.SetDefaults(force=True)` | Overwrites .toe values — establishes baseline |
 | 2 | TSV backup file | `AppStore.LoadFile()` | Merges persisted runtime state (row-by-row) |
 | 3 | `.env` file | `config.LoadEnvFile()` | Overwrites for environment-specific config |
+| 4 | OS env vars | `App.LoadSystemEnvVars()` → `config.LoadSystemEnvironmentVar()` | Project-specific keys set by the launching script — highest precedence among data sources |
 
-**Result:** defaults establish baseline over stale .toe values; persisted file restores last runtime state; `.env` overrides everything for environment-specific config. Hard-coded values set after Bootstrap (e.g. in `AddOpPaths()`) have the highest precedence.
+**Result:** defaults establish baseline over stale .toe values; persisted file restores last runtime state; `.env` overrides for project config; OS env vars override for launch-time/installation-specific config. Hard-coded values set after Bootstrap (e.g. in `AddOpPaths()`) still have the absolute highest precedence.
 
 ### Shell / OS environment variables
 
-OS-level vars (set before TD launches via `run-td-app-plus-env-var.cmd` or system env) are pulled into AppStore via explicit calls to:
+OS-level vars (set before TD launches via `run-td-app-plus-env-var.cmd` or system env) are pulled into AppStore by `App.LoadSystemEnvVars()`, called at Bootstrap step 4. Each variable is loaded explicitly with a fallback default so the app is functional even when the launching script wasn't used:
 
 ```python
 config.LoadSystemEnvironmentVar('my_key', default_value)
 ```
 
-This does store into AppStore (via `StoreValueInStore`) — it is not automatic during Bootstrap, but any call to it will push the value into AppStore with the same type inference as `.env` loading.
+Add project-specific keys to `App.LoadSystemEnvVars()` — they're routed through `AppStore.SetFromString()` for the same type inference as `.env` loading.
 
 ### .env type inference
 
@@ -148,11 +154,12 @@ AppStore maintains three parallel representations of state:
 
 ### Values set multiple times in a single frame
 
-During `Bootstrap()`, a key can be written up to three times in one frame:
+During `Bootstrap()`, a key can be written up to four times in one frame:
 
 1. `SetDefaults(force=True)` → sets baseline value
 2. `LoadFile()` → overwrites with persisted value (if key present in backup)
 3. `LoadEnvFile()` → overwrites with .env value (if key present)
+4. `LoadSystemEnvVars()` → overwrites with OS env value (if key wired in and present)
 
 Each `SetValue()` call updates the dependency and the table, but `NotifyListeners()` is only called when the value actually changes (string equality check). This means redundant writes (e.g. .env sets the same value as the persisted file) do not trigger extra listener callbacks.
 
