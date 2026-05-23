@@ -35,6 +35,7 @@ class AppStore:
 	def initListeners(self) -> None:
 		self.listeners: List[Any] = []
 		self.listenersByKey: Dict[str, List[Any]] = {}
+		self._suppressNotify: bool = False
 
 	def initStore(self) -> None:
 		"""Initialize internal operator references."""
@@ -141,7 +142,7 @@ class AppStore:
 				self.storeTable.appendRow(
 					[key, value, valueType, sender, eventId])
 
-			if changed:
+			if changed and not self._suppressNotify:
 				self.NotifyListeners(key, value, valueType)
 
 	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:

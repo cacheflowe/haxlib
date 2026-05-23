@@ -74,12 +74,15 @@ class App:
 
 	def Bootstrap(self):
 		# Load order: defaults (lowest) → persisted file → .env → shell env → hard-coded (highest)
+		# Suppress listener notifications until all layers are loaded
+		op.AppStore.ext.AppStore._suppressNotify = True
 		print("[App] Bootstrap: 1/3 SetDefaults(force=True)")
 		self.AppStore.SetDefaults(force=True)
 		print("[App] Bootstrap: 2/3 LoadFile()")
 		self.AppStore.LoadFile()
 		print("[App] Bootstrap: 3/3 LoadEnvFile()")
 		config.LoadEnvFile(os.path.join(project.folder, '.env'))
+		op.AppStore.ext.AppStore._suppressNotify = False
 		td.reloadModules = config.ReloadModules
 
 	def VerifyBootstrap(self):
