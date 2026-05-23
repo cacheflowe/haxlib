@@ -1,7 +1,8 @@
 from __future__ import annotations
-from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
+from typing import Any, ClassVar, Dict, List, Optional
 
 import json
+import os
 import threading
 import time
 import uuid
@@ -17,6 +18,9 @@ class AppStore:
 	"""
 
 	# singleton, set in __init__
+	# AppStore.i is set later by App.RegisterSingletons() → config.register_singleton().
+	# That bridges this instance into sys.modules['AppStore'].AppStore.i so that
+	# `from AppStore import AppStore` from any other extension/DAT sees it.
 	i: ClassVar[AppStore] = None  # type: ignore  
 
 	# Value type constants
@@ -26,9 +30,15 @@ class AppStore:
 
 	DISCONNECT_BANNER = "=" * 60
 
+	# Timing constants
+	SAVE_FILE_STARTUP_GUARD_SECONDS = 5  # skip SaveFile() during the first N seconds after launch
+	STARTUP_CONNECTION_CHECK_DELAY_MS = 2000  # grace period before logging startup disconnect
+
 	def __init__(self, ownerComp: baseCOMP) -> None:
-		AppStore.i = self
 		self.ownerComp: baseCOMP = ownerComp
+		self._suppressNotify: bool = False
+		self._pendingKeys: Dict[str, Optional[str]] = {}  # key → valueType, flushed at frame end
+		self._disconnectedFallbacks: Dict[str, int] = {}  # key → count of fallback writes during current outage
 		self.initListeners()
 		self.initStore()
 		self.initDependencies() # Initialize granular dependencies
@@ -37,9 +47,6 @@ class AppStore:
 	def initListeners(self) -> None:
 		self.listeners: List[Any] = []
 		self.listenersByKey: Dict[str, List[Any]] = {}
-		self._suppressNotify: bool = False
-		self._pendingKeys: Dict[str, Optional[str]] = {}  # key → valueType, flushed at frame end
-		self._disconnectedFallbacks: Dict[str, int] = {}  # key → count of fallback writes during current outage
 
 	def initStore(self) -> None:
 		"""Initialize internal operator references."""
@@ -285,6 +292,15 @@ class AppStore:
 		if needsCleanup:
 			self.cleanupDefunctListeners()
 
+	def SuppressNotifications(self) -> None:
+		"""Pause end-of-frame listener notifications. Pair with ResumeNotifications().
+		Use for bulk loads (Bootstrap) where you don't want listeners reacting per-key."""
+		self._suppressNotify = True
+
+	def ResumeNotifications(self) -> None:
+		"""Resume end-of-frame listener notifications."""
+		self._suppressNotify = False
+
 	def FlushNotifications(self) -> None:
 		"""Flush pending notifications at end of frame. Called by Execute DAT."""
 		if not self._pendingKeys:
@@ -341,7 +357,15 @@ class AppStore:
 	###################################################
 
 	def ClearData(self) -> None:
-		"""Clear all data from the store."""
+		"""Clear all data from the store and re-apply defaults.
+
+		Queues notifications for cleared keys with value=None so listeners can
+		react to removals. Defaults are then re-applied via SetValue, which
+		queues additional notifications for any keys present in the defaults table.
+		"""
+		if not self._suppressNotify:
+			for key in list(self.dependencies.keys()):
+				self._pendingKeys[key] = None
 		self.storeTable.clear()
 		self.dependencies.clear()
 		self.SetDefaults()
@@ -373,7 +397,7 @@ class AppStore:
 		self.CheckSocketReconnect()
 		# Grace period for the websocket to connect. If still disconnected after this,
 		# log the disconnect banner so startup-with-no-server is visible.
-		run("args[0]._startupConnectionCheck()", self, delayMilliSeconds=2000)
+		run("args[0]._startupConnectionCheck()", self, delayMilliSeconds=self.STARTUP_CONNECTION_CHECK_DELAY_MS)
 
 	def _startupConnectionCheck(self) -> None:
 		"""Fires once, 2s after init, to log if we started up disconnected."""
@@ -540,7 +564,7 @@ class AppStore:
 
 	def SaveFile(self) -> None:
 		"""Save the store to a backup file."""
-		if absTime.seconds < 5:
+		if absTime.seconds < self.SAVE_FILE_STARTUP_GUARD_SECONDS:
 			print('[AppStore] SaveFile skipped - app just started')
 			return
 		filePath = self.ownerComp.par.Backupfile.eval()
@@ -554,7 +578,6 @@ class AppStore:
 		if not filePath:
 			print('[AppStore] LoadFile: no Backupfile path configured, skipping')
 			return
-		import os
 		if not os.path.exists(filePath):
 			print(f'[AppStore] LoadFile: file not found at {filePath}, skipping')
 			return

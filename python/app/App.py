@@ -26,7 +26,7 @@ class App:
 	LAUNCH_WINDOW = 'launch_window'
 	CLOSE_WINDOW = 'close_window'
 	PERFORM_TOGGLE = 'perform_toggle'
-	
+
 	# modes
 	APP_STATE = 'app_state'
 	MODE_ATTRACT = 'attract'
@@ -41,6 +41,10 @@ class App:
 	AUDIO_ANALYSIS_DATA = 'audio_analysis_data'
 	SHOW_PIXEL_MAP = 'show_pixel_map'
 	BEAT_COUNT = 'beat_count'
+
+	# Timing constants
+	LAUNCH_OUTPUT_WINDOW_DELAY_FRAMES = 1000  # ~17s @ 60fps — wait for full project warm-up before going fullscreen
+	SET_STATE_DELAY_FRAMES = 5  # short defer so listeners are registered before state resumes
 
 	# singleton, set in __init__
 	i: ClassVar[App] = None  # type: ignore
@@ -63,19 +67,18 @@ class App:
 		print("[App] Initializing...")
 		print("[App] =============================")
 		self.Bootstrap()
-		self.VerifyBootstrap()
 		self.AddOpPaths()
 		self.ResizeExtensionNodes()
 		self.AddStoreListeners()
 		if self.AppStore.GetBoolean('is_production') == True:
-			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=1000)
+			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=App.LAUNCH_OUTPUT_WINDOW_DELAY_FRAMES)
 		self.SetInitialMode()
 		print("[App] Initialized!")
 
 	def Bootstrap(self):
 		# Load order: defaults (lowest) → persisted file → .env → shell env → hard-coded (highest)
 		# Suppress listener notifications until all layers are loaded
-		op.AppStore.ext.AppStore._suppressNotify = True
+		self.AppStore.SuppressNotifications()
 		print("[App] Bootstrap: 1/4 SetDefaults(force=True)")
 		self.AppStore.SetDefaults(force=True)
 		print("[App] Bootstrap: 2/4 LoadFile()")
@@ -84,7 +87,7 @@ class App:
 		config.LoadEnvFile(os.path.join(project.folder, '.env'))
 		print("[App] Bootstrap: 4/4 LoadSystemEnvVars()")
 		self.LoadSystemEnvVars()
-		op.AppStore.ext.AppStore._suppressNotify = False
+		self.AppStore.ResumeNotifications()
 		td.reloadModules = config.ReloadModules
 
 	def LoadSystemEnvVars(self):
@@ -95,7 +98,8 @@ class App:
 		config.LoadSystemEnvironmentVar('sys_env_var', 'Default Value')
 
 	def VerifyBootstrap(self):
-		# Temporary: confirm precedence is working. Remove after testing.
+		"""Diagnostic — prints currently loaded values. Call manually from the textport
+		(`op('/project1').VerifyBootstrap()`) when investigating bootstrap precedence."""
 		print("[App] ---- Bootstrap Verification ----")
 		print(f"[App]   is_production = {self.AppStore.GetBoolean('is_production')}")
 		print(f"[App]   app_w = {self.AppStore.GetFloat('app_w')}")
@@ -112,7 +116,7 @@ class App:
 		curState = self.CurState()
 		if curState and curState != "NONE":
 			print(f"[App] Resuming state: {curState}")
-			run(f"args[0].SetState(args[1])", self, curState, delayFrames=5)
+			run(f"args[0].SetState(args[1])", self, curState, delayFrames=App.SET_STATE_DELAY_FRAMES)
 			return
 
 	def AddOpPaths(self):
@@ -121,9 +125,10 @@ class App:
 	def ResizeExtensionNodes(self):
 		opAppStore = self.ownerComp.op('AppStore')
 		opApp = self.ownerComp.op('App')
-		if opAppStore is not None:
-			opApp.nodeWidth = opAppStore.nodeWidth
-			opApp.nodeHeight = opAppStore.nodeHeight
+		if opAppStore is None or opApp is None:
+			return
+		opApp.nodeWidth = opAppStore.nodeWidth
+		opApp.nodeHeight = opAppStore.nodeHeight
 
 	# ===============================================
 	# Global Helpers
