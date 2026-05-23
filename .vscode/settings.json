@@ -2,6 +2,7 @@
   "python.defaultInterpreterPath_BASIC": "C:\\Program Files\\Derivative\\TouchDesigner\\bin\\python.exe",
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
   "python.analysis.extraPaths": [
+    "${workspaceFolder}/python/stubs",
     "${workspaceFolder}/python/app",
     "${workspaceFolder}/python/scripts",
     "${workspaceFolder}/python/util",

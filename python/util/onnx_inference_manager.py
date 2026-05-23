@@ -22,8 +22,8 @@ import onnxruntime as ort
 import math
 
 # Import util modules (will be available in TouchDesigner context)
-onnx_util = mod(f'{op.PyUtils}/onnx_util')
-npu = mod(f'{op.PyUtils}/numpy_util')
+import onnx_util  # Custom utilities for ONNX logging and details
+import npu  # Neural Processing Unit utilities (if available)
 
 
 class ONNXInferenceManager:

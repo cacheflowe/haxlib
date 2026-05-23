@@ -60,9 +60,16 @@ extraPaths:
 
 | Path | Provides |
 |------|----------|
+| `python/stubs` | Hand-written stubs for TD C extension built-ins (see below) |
 | `Lib/site-packages` | Third-party packages TD ships (cv2, numpy, etc.) |
 | `Lib` | TD helpers: `TDFunctions`, `TDJSON`, `TDStoreTools` |
 | `Lib/tdi` | TD type stubs: `op()`, `me`, `absTime`, `tableDAT`, etc. |
+
+#### TD C extension built-ins (tdu, etc.)
+
+Some TD modules like `tdu` are C extensions loaded directly into TD's process at runtime — no `.py` file exists on disk for Pylance to introspect, even when pointing at TD's own Python interpreter. TD ships a stub for `td` at `Lib/tdi/td.py`, but not for `tdu`.
+
+The fix is a hand-written stub at `python/stubs/tdu.py`. This path is in `extraPaths` (Pylance only) but intentionally **not** in `TDPyEnvManagerContext.yaml`, so the stub never shadows TD's real built-in at runtime.
 
 ---
 
@@ -80,6 +87,94 @@ def loadPythonModules(self):
     for subdir in ['python', 'python/util', 'python/extensions', 'python/net']:
         config.AddPyDirToPath(os.path.join(project.folder, subdir))
 ```
+
+---
+
+### Project architecture: App as the entry point
+
+This project uses a single top-level `App` extension attached to the `/project` COMP. `App` is the first user-defined code that runs and is responsible for bootstrapping everything else — loading the AppStore file, applying defaults, registering singletons, and setting initial state.
+
+Other global extensions (`AppStore`, `Colors`, etc.) live as child COMPs of `/project`. TD initializes child COMPs before the parent, so by the time `App.__init__` runs, all child extensions are already initialized and accessible via `op.X.ext.X`.
+
+This architecture is what makes `RegisterSingletons()` work reliably — it runs at the top of `App.__init__` and can safely reach all child extensions. The initialization timing issues explored below are specific to this setup: a top-level orchestrator extension that boots after its dependencies.
+
+---
+
+### Autocomplete for op.ExtensionName references
+
+`op.AppStore`, `op.Colors`, etc. return `baseCOMP` — Pylance has no way to know the actual extension type.
+
+#### Singleton reference (recommended for most code)
+
+Add `i: ClassVar[AppStore] = None` to the extension class and set it in `__init__`. `from __future__ import annotations` is required so the forward reference to `AppStore` inside the class body resolves correctly.
+
+```python
+from __future__ import annotations
+from typing import ClassVar
+
+class AppStore:
+    i: ClassVar[AppStore] = None  # type: ignore  # singleton, set in __init__
+
+    def __init__(self, ownerComp: baseCOMP) -> None:
+        AppStore.i = self  # set on every TD init/reinit
+        ...
+```
+
+Any file that imports the class can then access the live instance with full autocomplete:
+
+```python
+from AppStore import AppStore
+
+AppStore.i.GetString('key')   # fully typed
+AppStore.i.SetFloat('key', 1) # fully typed
+```
+
+**Initialization caveat:** `AppStore.i` is `None` until `AppStore.__init__` runs. For most extensions this is fine — by the time their code executes, AppStore is already initialized. But the top-level `App` extension initializes *alongside* AppStore and cannot rely on `AppStore.i` being set during its own `__init__`.
+
+#### Typed property (for App and other top-level orchestrators)
+
+`op.AppStore` is resolved lazily by TD's runtime on every call, so it always reflects the current initialized state regardless of init order. A `@property` wrapper preserves this guarantee while adding type information:
+
+```python
+from AppStore import AppStore
+
+class App:
+    @property
+    def AppStore(self) -> AppStore:
+        return op.AppStore  # TD guarantees resolution after network init
+
+    def Bootstrap(self):
+        self.AppStore.LoadFile()  # safe even during App.__init__
+```
+
+Use the `@property` approach in `App.py` (or any extension that boots alongside its dependencies). Use `AppStore.i` everywhere else.
+
+**Note:** do not move the `@property` accessor into AppStore.py as a classmethod. File-based modules loaded via `sys.path` don't have the same TD builtin injection as extension scripts, so `op` may not be available there.
+
+#### Bridging the singleton into sys.modules
+
+TD loads extensions in its own execution context, separate from Python's import system. This means `AppStore.i` set during TD's extension init lives on a different class object than the one you get when doing `from AppStore import AppStore` in a DAT script. The two contexts don't share state by default.
+
+The fix is `App.RegisterSingletons()`, called at the top of `App.__init__`. It explicitly bridges every global singleton into `sys.modules` using `op.X.ext.X` (which resolves the live TD extension instance) and `config.register_singleton` (which sets `.i` on the cached module class):
+
+```python
+def RegisterSingletons(self) -> None:
+    App.i = config.register_singleton(self, 'App')
+    AppStore.i = config.register_singleton(op.AppStore.ext.AppStore, 'AppStore')
+    # Colors.i = config.register_singleton(op.Colors.ext.Colors, 'Colors')
+```
+
+Once this runs, any script — externalized or temporary — can import and use global extensions with full autocomplete and correct runtime values:
+
+```python
+from AppStore import AppStore
+from App import App
+
+curState = AppStore.i.GetString(App.i.APP_STATE)
+print(f"Current App State: {curState}")
+```
+
+This pattern gives the same convenience as `op.AppStore` / `op.App` at runtime, plus Pylance autocomplete on every method and attribute — in both externalized `.py` scripts and non-externalized temp DATs.
 
 ---
 
@@ -108,6 +203,8 @@ Parameter expressions must be a single expression (no semicolons), so use `__imp
 
 ```python
 __import__('td_util').get_node_color(me)
+
+__import__('penner').easeInOutExpoNorm(op('filter1')[0])
 ```
 
 If the module is already imported (e.g. after `td.reloadModules()` has run), you can also reference it directly via `sys.modules`:

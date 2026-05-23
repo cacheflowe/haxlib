@@ -1,6 +1,9 @@
+from __future__ import annotations
 import os
 import td
 import config
+from typing import ClassVar
+from AppStore import AppStore
 
 class App:
 	"""
@@ -36,12 +39,23 @@ class App:
 	SHOW_PIXEL_MAP = 'show_pixel_map'
 	BEAT_COUNT = 'beat_count'
 
+	# singleton, set in __init__
+	i: ClassVar[App] = None  # type: ignore
+
+	# Singleton access in App, pre-initialized, for use in Bootstrap and other early loading extensions 
+	@property
+	def AppStore(self) -> AppStore:
+		# Singleton access to the AppStore instance safely on init
+		# Outside of App.py we can use `AppStore.i`
+		return op.AppStore
+
 	# ===============================================
 	# Custom App Behavior
 	# ===============================================
 	
 	def __init__(self, ownerComp: containerCOMP):
 		self.ownerComp: containerCOMP = ownerComp
+		self.RegisterSingletons()
 		print("[App] =============================")
 		print("[App] Initializing...")
 		print("[App] =============================")
@@ -49,19 +63,25 @@ class App:
 		self.AddOpPaths()
 		self.ResizeExtensionNodes()
 		self.AddStoreListeners()
-		if op.AppStore.GetBoolean('is_production') == True:
+		if self.AppStore.GetBoolean('is_production') == True:
 			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=1000)
 		self.SetInitialMode()
 		print("[App] Initialized!")
 
-	def Bootstrap(self): 
-		op.AppStore.LoadFile()
+	def Bootstrap(self):
+		self.AppStore.LoadFile()
 		config.LoadEnvFile(os.path.join(project.folder, '.env'))
-		op.AppStore.par.Applydefaults.pulse()
-		td.reloadModules = config.ReloadModules
+		self.AppStore.par.Applydefaults.pulse()
+		td.reloadModules = config.ReloadModules # make global reload function available for dev use
+
+
+	def RegisterSingletons(self) -> None:
+		App.i = config.register_singleton(self, 'App')
+		AppStore.i = config.register_singleton(op.AppStore.ext.AppStore, 'AppStore')  # type: ignore[name-defined]
+		# Add future global extensions here: Colors.i = config.register_singleton(op.Colors.ext.Colors, 'Colors')
 
 	def SetInitialMode(self):
-		if op.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
+		if self.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
 			# Resume previous state in AppStore on startup
 			print(f"[App] Resetting current state: {self.CurState()}")
 			curState = self.CurState()
@@ -69,7 +89,7 @@ class App:
 			return
 
 	def AddOpPaths(self):
-		op.AppStore.SetString(App.EMPTY_FRAME_TOP, op('/project1/constant_frame').path)
+		self.AppStore.SetString(App.EMPTY_FRAME_TOP, op('/project1/constant_frame').path)
 	
 	def ResizeExtensionNodes(self):
 		opAppStore = self.ownerComp.op('AppStore')
@@ -83,24 +103,24 @@ class App:
 	# ===============================================
 
 	def CurState(self):
-		return op.AppStore.GetString(App.APP_STATE)
+		return self.AppStore.GetString(App.APP_STATE)
 
 	def SetState(self, state):
-		op.AppStore.SetString(App.APP_STATE, state)
+		self.AppStore.SetString(App.APP_STATE, state)
 	
 	def AppW(self):
-		return op.AppStore.GetFloat('app_w')
+		return self.AppStore.GetFloat('app_w')
 	
 	def AppH(self):
-		return op.AppStore.GetFloat('app_h')
+		return self.AppStore.GetFloat('app_h')
 
 	# ===============================================
 	# AppStore listeners
 	# ===============================================
 
 	def AddStoreListeners(self):
-		# op.AppStore.AddListener(self)
-		# op.AppStore.AddListener(self, App.PERFORM_TOGGLE)
+		# self.AppStore.AddListener(self)
+		# self.AppStore.AddListener(self, App.PERFORM_TOGGLE)
 		return
 
 	# def OnAppStoreValueChanged(self, key, value, type):

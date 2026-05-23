@@ -1,11 +1,11 @@
+from __future__ import annotations
 import json
 import threading
 import time
 import uuid
 import tdu # Import tdu for Dependency
 from subprocess import PIPE, STDOUT, Popen
-from typing import Any, Callable, Dict, List, Optional, Union
-
+from typing import Any, Callable, ClassVar, Dict, List, Optional, Union
 
 class AppStore:
 	"""
@@ -15,12 +15,16 @@ class AppStore:
 	WebSocket synchronization, and Python callback listeners.
 	"""
 
+	# singleton, set in __init__
+	i: ClassVar[AppStore] = None  # type: ignore  
+
 	# Value type constants
 	TYPE_NUMBER = 'number'
 	TYPE_STRING = 'string'
 	TYPE_BOOLEAN = 'boolean'
 
 	def __init__(self, ownerComp: baseCOMP) -> None:
+		AppStore.i = self
 		self.ownerComp: baseCOMP = ownerComp
 		self.initListeners()
 		self.initStore()

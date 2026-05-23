@@ -4,6 +4,21 @@ import glob
 import importlib
 import platform
 import td
+from typing import Any
+
+def register_singleton(instance: Any, module_name: str) -> Any:
+	"""Bridge a TD extension singleton into sys.modules so external imports find it.
+
+	TD loads extensions in its own execution context, separate from Python's import
+	system. Returns the instance so it can be used as a one-liner assignment:
+	  MyClass.i = config.register_singleton(instance, 'MyModule')
+	"""
+	mod = sys.modules.get(module_name)
+	if mod is not None:
+		cls = getattr(mod, type(instance).__name__, None)
+		if cls is not None:
+			cls.i = instance
+	return instance
 
 def PrintPythonPath():
 	print("[Config] 🐍----------------------------------🐍")
