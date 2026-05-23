@@ -192,27 +192,58 @@ Hard-coded values set after Bootstrap (e.g. `App.AddOpPaths()`) have the highest
 
 ## WebSocket Synchronization
 
-AppStore includes a built-in WebSocket bridge for browser/remote UI communication.
+## WebSocket Synchronization
 
-### Sending (TD → browser)
+AppStore is designed as part of a multi-app system on a local network, where a central WebSocket server is the authoritative source for shared state. TD apps broadcast their intent to change a value; the server validates and echoes the change back to all connected clients (including the originating one). This **server-as-truth** pattern ensures all clients converge on the same state.
 
-Pass `broadcast=True` to any setter:
+### Local vs. shared state — when to use `broadcast`
+
+Every value in AppStore is one of two things:
+
+- **Local state** (`broadcast=False`, the default) — internal to this TD app. Used for communication between components inside a single project: UI toggles, render flags, intermediate computed values, anything that doesn't need to leave this process. Listeners react via the standard end-of-frame batched notifications.
+
+- **Shared state** (`broadcast=True`) — part of the distributed system. The value is owned by the WebSocket server and synchronized across all connected clients (other TD apps, browser UIs, control surfaces, etc.). Useful even within a single-app deployment: it lets a browser-based control panel drive TD state without bespoke integration code, and scales naturally if you later add a second app to the network.
+
+The same key/value/listener machinery is used for both — the only difference is whether the write goes through the server first.
+
+### The `broadcast=True` flag
+
+Pass `broadcast=True` to any setter to participate in distributed state:
 
 ```python
 AppStore.i.SetFloat('score', 100, broadcast=True)
 ```
 
-This sends a JSON message over the WebSocket:
+Behavior depends on connection state:
+
+| Connection | Behavior |
+|------------|----------|
+| Connected | Sends over the wire, **does NOT update local state**. Waits for the server echo via `MessageReceived` to update locally. |
+| Disconnected | Falls back to a local-only update so the app keeps working offline. |
+
+This connectivity check is centralized inside `SetValue()` — callers don't need to call `IsConnected()` themselves.
+
+### Wire format
+
+Sent over the WebSocket:
 
 ```json
 {"store": true, "key": "score", "value": 100, "type": "number", "sender": "td-001"}
 ```
 
-### Receiving (browser → TD)
+The `sender` field identifies the originating client and prevents echo loops in multi-client scenarios.
 
-Incoming WebSocket messages with `{"store": true}` are parsed by `MessageReceived()` and written to the store via `SetValue()`. The sender field prevents echo loops.
+### Receiving (server → TD)
 
-### Connection state
+Incoming messages with `{"store": true}` are parsed by `MessageReceived()` and applied locally via `SetValue(..., broadcast=False)`. This is how echoed broadcasts make it back into the local store.
+
+### Reconnect behavior
+
+On reconnect, the server is expected to send a snapshot of full server state as JSON. The parser for this snapshot is not yet implemented — when it arrives, all shared keys will sync to the authoritative server values.
+
+In the meantime, no automatic re-sync happens on reconnect — both sides resume from their last known states and converge through subsequent writes.
+
+### Connection state API
 
 - `IsConnected()` — check if WebSocket is active
 - `StartWebServer()` — launch the web server script in a background thread

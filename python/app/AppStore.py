@@ -24,6 +24,8 @@ class AppStore:
 	TYPE_STRING = 'string'
 	TYPE_BOOLEAN = 'boolean'
 
+	DISCONNECT_WARNING_INTERVAL = 60  # seconds between disconnect warnings when broadcasting while disconnected
+
 	def __init__(self, ownerComp: baseCOMP) -> None:
 		AppStore.i = self
 		self.ownerComp: baseCOMP = ownerComp
@@ -37,6 +39,7 @@ class AppStore:
 		self.listenersByKey: Dict[str, List[Any]] = {}
 		self._suppressNotify: bool = False
 		self._pendingKeys: Dict[str, Optional[str]] = {}  # key → valueType, flushed at frame end
+		self._lastDisconnectWarning: float = 0.0  # rate-limit disconnect warnings
 
 	def initStore(self) -> None:
 		"""Initialize internal operator references."""
@@ -117,34 +120,48 @@ class AppStore:
 	###################################################
 
 	def SetValue(self, key: str, value: Any, valueType: Optional[str] = None, sender: Optional[str] = None, broadcast: bool = False) -> None:
-		"""Set a value in the store with optional broadcasting."""
-		if broadcast:
+		"""Set a value in the store.
+
+		If broadcast=True and the WebSocket is connected, send over the wire and
+		wait for the echo to update local state (server-as-truth pattern).
+		If broadcast=True but disconnected, fall back to a local update so the
+		app keeps functioning offline.
+		"""
+		if broadcast and self.IsConnected():
 			self.broadcastValue(key, value, valueType)
+			return
+
+		if broadcast:
+			# Disconnected — log occasionally, then fall through to local update
+			now = time.time()
+			if now - self._lastDisconnectWarning > self.DISCONNECT_WARNING_INTERVAL:
+				print(f"[AppStore] WebSocket disconnected — falling back to local update for '{key}'")
+				self._lastDisconnectWarning = now
+
+		# Local update (either broadcast=False, or disconnected fallback)
+		isNew = key not in self.dependencies
+		oldValue = None if isNew else self.dependencies[key].val
+		changed = isNew or str(oldValue) != str(value)
+
+		# Update granular dependency (triggers cooks only for listeners of this key)
+		if isNew:
+			self.dependencies[key] = tdu.Dependency(value)
 		else:
-			# Check if value actually changed
-			isNew = key not in self.dependencies
-			oldValue = None if isNew else self.dependencies[key].val
-			changed = isNew or str(oldValue) != str(value)
+			self.dependencies[key].val = value
 
-			# Update granular dependency (triggers cooks only for listeners of this key)
-			if isNew:
-				self.dependencies[key] = tdu.Dependency(value)
-			else:
-				self.dependencies[key].val = value
+		# Update Table (triggers cooks for anyone watching the whole table)
+		eventId = self.newEventId()
+		if self.storeTable.row(key) is not None:
+			self.storeTable[key, 1] = value
+			self.storeTable[key, 2] = valueType
+			self.storeTable[key, 3] = sender or ''
+			self.storeTable[key, 4] = eventId
+		else:
+			self.storeTable.appendRow(
+				[key, value, valueType, sender, eventId])
 
-			# Update Table (triggers cooks for anyone watching the whole table)
-			eventId = self.newEventId()
-			if self.storeTable.row(key) is not None:
-				self.storeTable[key, 1] = value
-				self.storeTable[key, 2] = valueType
-				self.storeTable[key, 3] = sender or ''
-				self.storeTable[key, 4] = eventId
-			else:
-				self.storeTable.appendRow(
-					[key, value, valueType, sender, eventId])
-
-			if changed and not self._suppressNotify:
-				self._pendingKeys[key] = valueType
+		if changed and not self._suppressNotify:
+			self._pendingKeys[key] = valueType
 
 	def SetFloat(self, key: str, value: float, broadcast: bool = False) -> None:
 		"""Set a numeric value in the store."""
