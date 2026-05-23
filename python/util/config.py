@@ -99,14 +99,13 @@ def LoadSystemEnvironmentVar(key, default_value=None):
 
 
 def StoreValueInStore(key, value):
-	# Store a value in the AppStore
+	if value is None:
+		return
 	if td.op.AppStore:
-		# check for number/boolean types
-		if value.isdigit():
-			td.op.AppStore.SetFloat(key, value)
-		elif value.lower() in ['true', 'false']:
-			value = value.lower() == 'true'
-			td.op.AppStore.SetBoolean(key, value)
+		if str(value).isdigit():
+			td.op.AppStore.SetFloat(key, float(value))
+		elif str(value).lower() in ['true', 'false']:
+			td.op.AppStore.SetBoolean(key, str(value).lower() == 'true')
 		else:
 			td.op.AppStore.SetString(key, str(value))
 	else:
