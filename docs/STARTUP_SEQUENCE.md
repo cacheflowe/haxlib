@@ -117,7 +117,7 @@ This does store into AppStore (via `StoreValueInStore`) — it is not automatic 
 
 ### .env type inference
 
-`config.LoadEnvFile()` (via `StoreValueInStore`) infers types when storing to AppStore:
+`config.LoadEnvFile()` and `config.LoadSystemEnvironmentVar()` route raw string values through `AppStore.SetFromString()`, which infers a type:
 
 ```
 "true" / "false"      → SetBoolean()

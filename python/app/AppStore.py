@@ -179,6 +179,37 @@ class AppStore:
 		"""Set a boolean value in the store."""
 		self.SetValue(key, value, self.TYPE_BOOLEAN, self.getSenderId(), broadcast)
 
+	def SetFromString(self, key: str, rawValue: Any, broadcast: bool = False) -> None:
+		"""Infer type from a raw string and store.
+
+		For sources that don't carry type info (.env files, system env vars, etc.).
+		Recognizes 'true'/'false' (case-insensitive) as bool. Parses numerics with
+		float() — handles negatives, decimals, scientific notation. Preserves
+		leading-zero strings like '0123' as strings (likely IDs/codes, not numbers).
+		Logs when an existing key is overwritten.
+		"""
+		if rawValue is None:
+			return
+		existed = self.HasValue(key)
+		s = str(rawValue).strip()
+		low = s.lower()
+		if low in ('true', 'false'):
+			self.SetBoolean(key, low == 'true', broadcast)
+		else:
+			isLeadingZero = len(s) > 1 and s[0] == '0' and s[1] not in ('.', 'e', 'E')
+			parsedFloat = None
+			if not isLeadingZero:
+				try:
+					parsedFloat = float(s)
+				except ValueError:
+					pass
+			if parsedFloat is not None:
+				self.SetFloat(key, parsedFloat, broadcast)
+			else:
+				self.SetString(key, s, broadcast)
+		if existed:
+			print(f"[AppStore]   (overwriting existing key: {key})")
+
 	def broadcastValue(self, key: str, value: Any, valueType: Optional[str]) -> None:
 		"""Broadcast a value change over WebSocket."""
 		jsonOut = {

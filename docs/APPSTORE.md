@@ -274,6 +274,7 @@ The COMP color indicates connection state: yellow = disconnected, green = connec
 | `SetFloat(key, value, broadcast=False)` | Stores as TYPE_NUMBER |
 | `SetString(key, value, broadcast=False)` | Stores as TYPE_STRING |
 | `SetBoolean(key, value, broadcast=False)` | Stores as TYPE_BOOLEAN |
+| `SetFromString(key, rawValue, broadcast=False)` | Type-inferred setter for string-only sources (.env, env vars). Bool/float/leading-zero/string rules. |
 
 ### Listeners
 
