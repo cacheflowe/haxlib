@@ -1,9 +1,12 @@
 from __future__ import annotations
+from typing import ClassVar
+
+from AppStore import AppStore
+from Colors import Colors
+
 import os
 import td
 import config
-from typing import ClassVar
-from AppStore import AppStore
 
 class App:
 	"""
@@ -91,7 +94,7 @@ class App:
 	def RegisterSingletons(self) -> None:
 		App.i = config.register_singleton(self, 'App')
 		AppStore.i = config.register_singleton(op.AppStore.ext.AppStore, 'AppStore')  # type: ignore[name-defined]
-		# Add future global extensions here: Colors.i = config.register_singleton(op.Colors.ext.Colors, 'Colors')
+		Colors.i = config.register_singleton(op.Colors.ext.Colors, 'Colors')  # type: ignore[name-defined]
 
 	def SetInitialMode(self):
 		curState = self.CurState()

@@ -1,11 +1,19 @@
 from __future__ import annotations
+from typing import ClassVar
+
 import tdu
+
 
 class Colors:
 	"""
 	Colors description
 	"""
+
+	# singleton, set in __init__
+	i: ClassVar[Colors] = None  # type: ignore
+
 	def __init__(self, ownerComp):
+		Colors.i = self
 		self.ownerComp = ownerComp
 		self.RebuildColors()
 

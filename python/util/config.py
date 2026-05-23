@@ -102,12 +102,15 @@ def StoreValueInStore(key, value):
 	if value is None:
 		return
 	if td.op.AppStore:
+		existed = td.op.AppStore.HasValue(key)
 		if str(value).isdigit():
 			td.op.AppStore.SetFloat(key, float(value))
 		elif str(value).lower() in ['true', 'false']:
 			td.op.AppStore.SetBoolean(key, str(value).lower() == 'true')
 		else:
 			td.op.AppStore.SetString(key, str(value))
+		if existed:
+			print(f"[Config]   (overwriting existing key: {key})")
 	else:
 		print("[Config] AppStore not available.")
 
