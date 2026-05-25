@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from typing import Any, ClassVar, Dict, List, Optional
 
 import json
@@ -17,7 +17,7 @@ class AppStore:
 	WebSocket synchronization, and Python callback listeners.
 	"""
 
-	# singleton, set in __init__
+	# singleton, set in App.py
 	# AppStore.i is set later by App.RegisterSingletons() → config.register_singleton().
 	# That bridges this instance into sys.modules['AppStore'].AppStore.i so that
 	# `from AppStore import AppStore` from any other extension/DAT sees it.

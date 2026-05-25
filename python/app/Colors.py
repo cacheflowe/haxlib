@@ -9,11 +9,10 @@ class Colors:
 	Colors description
 	"""
 
-	# singleton, set in __init__
+	# singleton, set in App.py
 	i: ClassVar[Colors] = None  # type: ignore
 
 	def __init__(self, ownerComp):
-		Colors.i = self
 		self.ownerComp = ownerComp
 		self.RebuildColors()
 
