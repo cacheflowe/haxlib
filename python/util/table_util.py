@@ -1,13 +1,14 @@
 import json
+import td
 
-def get_kv_prop(table: tableDAT, key):
+def get_kv_prop(table: td.DAT, key):
 	row = table.row(key)
 	if row != None:
 		return row[1]
 	else:
 		return None
 
-def set_kv_prop(table: tableDAT, key, value):
+def set_kv_prop(table: td.DAT, key, value):
 	row = table.row(key)
 	if row != None:
 		table.replaceRow(key, [key, value])
@@ -17,14 +18,14 @@ def set_kv_prop(table: tableDAT, key, value):
 		else:
 			table.appendRow([key, value], table.numRows - 1)
 
-def remove_kv_prop(table: tableDAT, key):
+def remove_kv_prop(table: td.DAT, key):
 	if table.row(key) != None:
 		table.deleteRow(key)
 
-def remove_all_rows(table: tableDAT):
+def remove_all_rows(table: td.DAT):
 	table.clear()
 
-def table_to_json(table: tableDAT):
+def table_to_json(table: td.DAT):
 	data = {}
 	for row in range(0, table.numRows):
 		# get data from table
@@ -45,5 +46,5 @@ def table_to_json(table: tableDAT):
 		data[key] = value
 	return data
 
-def table_to_json_str(table: tableDAT):
+def table_to_json_str(table: td.DAT):
 	return json.dumps(table_to_json(table))

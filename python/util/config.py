@@ -110,7 +110,7 @@ def ReloadModules():
 	for subdir in subdirs:
 		for filepath in glob.glob(os.path.join(td.project.folder, subdir, '*.py')):
 			modName = os.path.splitext(os.path.basename(filepath))[0]
-			if modName.startswith('_') or modName in ('App', 'Bootstrap'):
+			if modName.startswith('_') or modName in ('App'):
 				continue
 			try:
 				if modName in sys.modules:
@@ -120,10 +120,14 @@ def ReloadModules():
 				else:
 					importlib.import_module(modName)
 					reloaded.append(modName)
-			except ModuleNotFoundError:
+			except ModuleNotFoundError as e:
+				print(f'[Config] Skipping {modName}: {e}')
 				skipped.append(modName)
-			except Exception:
+			except BaseException:
+				print(f'[Config] Error reloading module {modName}:', sys.exc_info()[0], sys.exc_info()[1])
 				skipped.append(modName)
-	print(f'[Config] Reloaded: {reloaded}')
+	reloaded_list = '\n'.join(f'  - {m}' for m in reloaded)
+	print(f'[Config] Reloaded:\n{reloaded_list}')
 	if skipped:
-		print(f'[Config] Skipped: {skipped}')
+		skipped_list = '\n'.join(f'  - {m}' for m in skipped)
+		print(f'[Config] Skipped:\n{skipped_list}')

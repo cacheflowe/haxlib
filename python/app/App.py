@@ -95,7 +95,13 @@ class App:
 		print("[App] Bootstrap: 4/4 LoadSystemEnvVars()")
 		self.LoadSystemEnvVars()
 		self.AppStore.ResumeNotifications()
+		# set reload modules on global td for easy access from textport:
+		# - op.App.ReloadModules()
+		# - td.reloadModules()  # alias for convenience
 		td.reloadModules = config.ReloadModules
+
+	def ReloadModules(self):
+		config.ReloadModules()
 
 	def LoadSystemEnvVars(self):
 		"""Load OS-level environment variables that may have been set by the launching script

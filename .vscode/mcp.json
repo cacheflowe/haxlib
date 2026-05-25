@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "td-docs-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "D:\\workspace\\td-docs-mcp\\", "run", "td-docs-mcp"]
+    }
+  }
+}
