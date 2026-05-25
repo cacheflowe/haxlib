@@ -5,7 +5,9 @@ from AppStore import AppStore
 from Colors import Colors
 
 import os
+import json
 import td
+
 import config
 
 class App:
@@ -32,13 +34,17 @@ class App:
 	MODE_ATTRACT = 'attract'
 	MODE_GAMEPLAY = 'gameplay'
 	MODE_GAME_OVER = 'game_over'
+	MAIN_SECTIONS_LIST = [MODE_ATTRACT, MODE_GAMEPLAY, MODE_GAME_OVER]
+	APP_STATE_BUTTONS = 'app_state_buttons'  # replace buttons on www/TD UI
 
 	# node paths
 	EMPTY_FRAME_TOP = 'empty_frame_top'
 
 	# other props
 	AUDIO_VOLUME = 'audio_volume'
+	SFX = 'sfx'
 	AUDIO_ANALYSIS_DATA = 'audio_analysis_data'
+	BRIGHTNESS = 'brightness'
 	SHOW_PIXEL_MAP = 'show_pixel_map'
 	BEAT_COUNT = 'beat_count'
 
@@ -73,6 +79,7 @@ class App:
 		if self.AppStore.GetBoolean('is_production') == True:
 			run(f"op('{self.ownerComp.path}').LaunchOutputWindow(True)", delayFrames=App.LAUNCH_OUTPUT_WINDOW_DELAY_FRAMES)
 		self.SetInitialMode()
+		run(lambda: self.BuildAppStateForUI(), delayMilliSeconds=1000)
 		print("[App] Initialized!")
 
 	def Bootstrap(self):
@@ -119,6 +126,9 @@ class App:
 			run(f"args[0].SetState(args[1])", self, curState, delayFrames=App.SET_STATE_DELAY_FRAMES)
 			return
 
+	def BuildAppStateForUI(self):
+		self.AppStore.SetStringFromObj(App.APP_STATE_BUTTONS, App.MAIN_SECTIONS_LIST, broadcast=True)
+
 	def AddOpPaths(self):
 		self.AppStore.SetString(App.EMPTY_FRAME_TOP, op('/project1/constant_frame').path)
 	
@@ -145,6 +155,9 @@ class App:
 	
 	def AppH(self):
 		return self.AppStore.GetFloat('app_h')
+
+	def PlaySFX(self, sfxName):
+		self.AppStore.SetString(App.SFX, sfxName)
 
 	# ===============================================
 	# AppStore listeners

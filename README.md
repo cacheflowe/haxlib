@@ -20,7 +20,7 @@ Use **TDI_Library** by adding `.vscode/settings.json`:
 }
 ```
 
-Add `td-docs-mcp` to `.vscode/mcp.json` for AI-assisted TD documentation context. You'll need to pull [td-docs-mcp](https://github.com/cacheflowe/td-docs-mcp) locally and point to it:
+Add `td-docs-mcp` to `.vscode/mcp.json` for AI-assisted TD documentation context. You'll need to pull [td-docs-mcp](https://github.com/cacheflowe/td-docs-mcp) locally and point to it for Copilot:
 
 ```json
 {
@@ -33,6 +33,21 @@ Add `td-docs-mcp` to `.vscode/mcp.json` for AI-assisted TD documentation context
   }
 }
 ```
+
+And for Claude, add the following to .mcp.json:
+
+```json
+{
+  "mcpServers": {
+    "td-docs-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "D:\\workspace\\td-docs-mcp\\", "run", "td-docs-mcp"]
+    }
+  }
+}
+```
+
 
 ## TODO
 

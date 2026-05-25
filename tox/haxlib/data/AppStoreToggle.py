@@ -8,6 +8,7 @@ class AppStoreToggle:
 		self.init()
 
 	def init(self):
+		self._pendingShow = None
 		# get ops
 		self.showChop = op('constant_show')
 		self.outChop = op('out1')
@@ -29,7 +30,7 @@ class AppStoreToggle:
 
 	def Show(self):
 		delayMs = parent().par.Showdelay.eval() * 1000
-		run(lambda: self.SetValue(1), delayMilliSeconds=delayMs)
+		self._pendingShow = run(lambda: self.SetValue(1), delayMilliSeconds=delayMs)
 		self.filterChop.par.width = parent().par.Showduration.eval()
 		self.mathInOutChop.par.preoff = -1
 		self.mathInOutChop.par.gain = 1
@@ -39,6 +40,9 @@ class AppStoreToggle:
 		return
 
 	def Hide(self):
+		if self._pendingShow is not None:
+			self._pendingShow.kill()
+			self._pendingShow = None
 		delayMs = parent().par.Hidedelay.eval() * 1000
 		run(lambda: self.SetValue(0), delayMilliSeconds=delayMs)
 		self.filterChop.par.width = parent().par.Hideduration.eval()

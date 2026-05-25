@@ -12,11 +12,11 @@
     "update-libs": "npx npm-check-updates -u && npm install"
   },
   "devDependencies": {
-    "@vitejs/plugin-basic-ssl": "^2.2.0",
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
     "concurrently": "^9.2.1",
-    "vite": "^8.0.0"
+    "vite": "^8.0.14"
   },
   "dependencies": {
-    "oversite": "^1.0.8"
+    "oversite": "^1.0.9"
   }
 }

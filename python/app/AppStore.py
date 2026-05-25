@@ -179,6 +179,10 @@ class AppStore:
 		"""Set a string value in the store."""
 		self.SetValue(key, value, self.TYPE_STRING, self.getSenderId(), broadcast)
 
+	def SetStringFromObj(self, key: str, value: Any, broadcast: bool = False) -> None:
+		"""Convert an object or array to a JSON string value in the store."""
+		self.SetString(key, json.dumps(value), broadcast)
+
 	def SetBoolean(self, key: str, value: bool, broadcast: bool = False) -> None:
 		"""Set a boolean value in the store."""
 		self.SetValue(key, value, self.TYPE_BOOLEAN, self.getSenderId(), broadcast)

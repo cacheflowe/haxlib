@@ -4,3 +4,4 @@ cui_00341.wav			app_state	game_over	0	0	0.5
 cui_00391.wav			app_state	attract					
 ea01_seq_130bpm.wav	0.4	1	btn_toggle	1	1		2	app_state	attract
 cui_00352.wav	0.4		btn_pulse	1					
+cui_00352.wav			sfx	perform_toggle					
