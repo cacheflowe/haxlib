@@ -373,6 +373,7 @@ class AppStore:
 		self.storeTable.clear()
 		self.dependencies.clear()
 		self.SetDefaults()
+		self.SaveFile()
 
 	def RemoveValue(self, key: str, broadcast: bool = False) -> None:
 		"""Remove a value from the store."""
@@ -511,9 +512,34 @@ class AppStore:
 				print(f"[AppStore] Store message missing required field {e}: {data!r}")
 				return
 			sender = data.get('sender', '')
-			self.SetValue(key, value, valueType, sender, False)
+			if key == 'persistent_state':
+				self._handlePersistentState(value)
+			else:
+				self.SetValue(key, value, valueType, sender, False)
 		else:
 			print('[AppStore] Generic json message received')
+
+	def _handlePersistentState(self, stateData: Any) -> None:
+		"""Load full persisted state from the server into the store.
+
+		Only applies if the Loadserverstate parameter is enabled.
+		stateData is a dict of key -> {key, value, type, sender, ...}.
+		"""
+		if not self.ownerComp.par.Loadserverstate.eval():
+			print('[AppStore] Received persistent_state but Loadserverstate is disabled, ignoring')
+			return
+		if not isinstance(stateData, dict):
+			print(f'[AppStore] persistent_state value is not a dict, ignoring')
+			return
+		print(f'[AppStore] Loading persistent_state from server ({len(stateData)} keys)')
+		for key, entry in stateData.items():
+			if not isinstance(entry, dict):
+				continue
+			value = entry.get('value')
+			valueType = entry.get('type')
+			sender = entry.get('sender', '')
+			if value is not None and valueType:
+				self.SetValue(key, value, valueType, sender, False)
 
 	###################################################
 	# Client Connection
