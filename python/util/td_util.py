@@ -1,3 +1,4 @@
+from math import ceil
 import td
 
 def set_node_color(op: td.OP, r, g, b):
@@ -8,10 +9,23 @@ def set_node_color(op: td.OP, r, g, b):
 def get_node_color(op: td.OP):
 	return op.color
 
+def node_size_default_node():
+	return (130, 90)
+
+def node_size_default_base_comp():
+	return (160, 130)
+
+def get_node_size(op: td.OP):
+	return (op.nodeWidth, op.nodeHeight)
 
 def set_node_size(op: td.OP, width, height):
 	op.nodeWidth = width
 	op.nodeHeight = height
+	return
+
+def set_node_size_small(op: td.OP):
+	origSize = node_size_default_node()
+	set_node_size(op, origSize[0]/2, origSize[1]/2)
 	return
 
 def reset_node_size(op: td.OP):
@@ -29,6 +43,49 @@ def nodes_in_comp(comp: td.baseCOMP):
 
 def nodes_of_type(nodes: list[td.OP], opType):
 	return [op for op in nodes if isinstance(op, opType)]
+
+
+def get_downstream_ops(node: td.OP) -> list[td.OP]:
+	"""Return all ops directly connected to node's outputs."""
+	return list(node.outputs)
+
+
+def get_all_downstream_ops(node: td.OP, _visited: set = None) -> list[td.OP]:
+	"""Return all ops reachable downstream from node (recursive, no duplicates)."""
+	if _visited is None:
+		_visited = set()
+	_visited.add(node.id)
+	result = [node]
+	for op in node.outputs:
+		if op.id not in _visited:
+			result.extend(get_all_downstream_ops(op, _visited))
+	return result
+
+
+def set_node_collection_small(nodes: list[td.OP]):
+	# usage: td_util.set_node_collection_small(td_util.get_all_downstream_ops(op('project1/lfo1')))
+	for node in nodes:
+		set_node_size_small(node)
+
+
+def straighten_node_layout(node: td.OP, pad_x=10):
+	# usage: td_util.straighten_node_layout(op('/project1/lfo1'))
+	"""Straighten the layout of a node and its downstream connections."""
+	downstream = get_all_downstream_ops(node)
+	cur_x = node.nodeX
+	starting_y = node.nodeY
+	for i, op in enumerate(downstream):
+		cur_x = ceil(cur_x / 25) * 25  # Round to nearest 25 for cleaner layout
+		op.nodeX = cur_x
+		cur_x += op.nodeWidth + pad_x
+		op.nodeY = starting_y
+
+
+def straighten_hovered_op():
+	curOp: td.OP = td.ui.rolloverOp
+	if curOp is None:
+		return
+	straighten_node_layout(curOp)
 
 
 def print_op_tree(root: td.OP = None, max_depth: int = -1) -> None:

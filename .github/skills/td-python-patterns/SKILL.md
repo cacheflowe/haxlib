@@ -92,6 +92,16 @@ chan.numpyArray()               # All samples as numpy array
 # Common pattern: read a CHOP value in an expression
 # In a parameter expression field:
 op('constant1')['chan1']        # Returns the evaluated value directly
+
+# transform or remap a number:
+# in a constant, referencing another operator's channel with some math:
+__import__('penner').easeInOutExpoNorm(op('filter1')[0])
+# or in a script CHOP:
+def onCook(scriptOp: scriptCHOP):
+	scriptOp.clear()
+	chan = scriptOp.appendChan('chan1')
+	inputVal = scriptOp.inputs[0][0][0]
+	chan[0] = __import__('penner').easeInOutExpoNorm(inputVal)
 ```
 
 ## TOP Pixel Access
