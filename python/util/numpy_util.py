@@ -2,6 +2,9 @@ import numpy
 # import mediapipe as mp
 import cv2
 
+def print_version_info():
+	print(f"Numpy version: {numpy.__version__}")
+
 def flip_v(nA):
 	return cv2.flip(nA, 0)
 
