@@ -19,6 +19,8 @@ import touchdesigner
 
 **Correct:** `td`, `op`, `me`, `parent`, `ui`, `absTime` are pre-loaded globals. Never import them.
 
+TD embeds its own Python interpreter. Standard library modules import normally, but to share code between DATs use `mod` (e.g., `mod.myModule.myFunction()`), not relative imports. Do not use `from td import *` or attempt to import TD globals from another module.
+
 ---
 
 ## 2. Inventing Parameter Names
@@ -27,10 +29,9 @@ import touchdesigner
 ```python
 op('noise1').par.frequency       # Guessed — doesn't exist
 op('moviefilein1').par.filename   # Guessed — actual name is 'file'
-op('text1').par.fontsize         # Guessed — actual name is 'fontsize' or 'fontsizex'
 ```
 
-**Correct:** Parameter identifiers are the backtick names in the documentation (e.g., `roughness`, `resolutionw`, `file`). Always look them up — they are not consistently named and cannot be reliably guessed.
+**Correct:** Parameter identifiers are the backtick names in the documentation (e.g., `roughness`, `resolutionw`, `file`). Always look them up — they are not consistently named and cannot be reliably guessed. For Text TOP font size, `par.fontsizex` is the canonical name; `par.fontsize` may exist as an alias in some builds, so verify on the parameter page.
 
 ---
 
@@ -66,13 +67,13 @@ op('table1')[0, 0].val          # Tuple indexing — row, col
 op('table1')['name', 'col'].val # By header names
 ```
 
-Always use `[row, col]` tuple syntax. Always append `.val` to read the string value.
+Always use `[row, col]` tuple syntax. Always append `.val` to read the cell's value as a string. To use it as a number, cast explicitly: `float(op('table1')[0, 0].val)` or `int(op('table1')[0, 0].val)`.
 
 ---
 
 ## 5. `.val` vs `.eval()`
 
-**Wrong assumption:** `.val` and `.eval()` do completely different things.
+**Common confusion:** `.val` and `.eval()` are treated as if they do completely different things when reading parameters.
 
 **Correct:** For reading a parameter value, both `.val` and `.eval()` return the evaluated result. Prefer `.eval()` for clarity. The distinction matters when *setting*:
 
@@ -86,6 +87,8 @@ op('noise1').par.roughness = 0.5        # Sets value
 op('noise1').par.roughness.val = 0.5    # Same thing
 op('noise1').par.roughness.expr = '...' # Sets expression string
 ```
+
+`op()` returns `None` if the operator does not exist — it does not raise an exception. Always guard: `n = op('path'); if n is None: return`. Calling `.par`, `.width`, or any attribute on a `None` result raises `AttributeError`, not a TD-specific error.
 
 ---
 
@@ -134,7 +137,7 @@ def worker():
 threading.Thread(target=worker).start()
 ```
 
-**Correct:** TouchDesigner operator access is **not thread-safe**. All operator reads/writes must happen on the main thread. For async work, use `td.run()` with delays or process data in the thread and pass results back via storage or a queue that the main thread reads.
+**Correct:** TouchDesigner operator access is **not thread-safe**. All operator reads/writes must happen on the main thread. For async work, use the global `run()` function with delays (not `td.run()`), or process data in the thread and pass results back via storage or a queue that the main thread reads. Violations of thread safety in TD often produce silent failures or non-deterministic crashes that do not surface as Python exceptions in the textport. If threading-related bugs are suspected, eliminate all `op()` access from worker threads as the first debugging step.
 
 ---
 
@@ -196,7 +199,7 @@ def onOffToOn(panel, value, prev):
     pass
 ```
 
-**Correct:** Callback signatures are exact. See [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) for the complete list. Key signatures:
+**Correct:** Callback signatures are exact. See [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) for the complete list. The three signatures below are illustrative only. Do not infer other callback signatures from these examples — always treat unlisted signatures as unknown and tell the user to verify in the documentation. Key signatures:
 
 - CHOP Execute: `def onValueChange(channel, sampleIndex, val, prev)`
 - Panel Execute: `def onOffToOn(panelValue)`

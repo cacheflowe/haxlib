@@ -4,7 +4,7 @@
   * [https://alltd.org/](https://alltd.org/)  
   * [https://matthewragan.com/teaching-resources/touchdesigner/](https://matthewragan.com/teaching-resources/touchdesigner/)   
   * [https://github.com/chungbwc/TouchDesigner](https://github.com/chungbwc/TouchDesigner)   
-  * [https://github.com/DBraun/TouchDesigner\_Shared](https://github.com/DBraun/TouchDesigner_Shared)   
+  * [https://github.com/DBraun/TouchDesigner_Shared](https://github.com/DBraun/TouchDesigner_Shared)   
   * [https://github.com/vinz9/](https://github.com/vinz9/)   
 * Tools  
   * [https://olib.amb-service.net/](https://olib.amb-service.net/) - OLIB  
@@ -15,7 +15,7 @@
   * [https://interactiveimmersive.io/blog/touchdesigner-lessons/touchdesigner-beginner-tricks/](https://interactiveimmersive.io/blog/touchdesigner-lessons/touchdesigner-beginner-tricks/)   
   * [TouchDesigner Beginner Crash Course](https://www.youtube.com/playlist?list=PLpuCjVEMQha9rjhDET3uuE0T3UeIcROJu)  
   * [Absolute Beginner TouchDesigner | From Zero to Hero with Examples and Assignments](https://www.youtube.com/watch?v=qbupHTeJCeU)  
-  * [https://www.youtube.com/watch?v=guNquMaplW8\&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG\&index=27](https://www.youtube.com/watch?v=guNquMaplW8&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG&index=27) - Gray Area class\!  
+  * [https://www.youtube.com/watch?v=guNquMaplW8&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG&index=27](https://www.youtube.com/watch?v=guNquMaplW8&list=PLm8zJ0HKEJIaVUQ5J7NTutC76WbVBSxLG&index=27) - Gray Area class!  
   * Torin:  
     * [Face, Hand, Pose Tracking & More in TouchDesigner with @MediaPipe GPU Plugin](https://www.youtube.com/watch?v=Cx4Ellaj6kk)   
     * [Audio-Reactive Visuals in TouchDesigner](https://www.youtube.com/watch?v=R7sAomk2vR4)   
@@ -74,34 +74,36 @@
     * [https://www.youtube.com/watch?v=9ynL-JckDkY](https://www.youtube.com/watch?v=9ynL-JckDkY)   
     * [Watercolor Hand Tracking Brush in TouchDesigner Tutorial](https://www.youtube.com/watch?v=IATX3biLoZg)   
   * Gaussian splatting  
-    * [Light Up Gaussian Splatting\!\!](https://www.youtube.com/watch?v=axY-a_1TNng) (uses Unreal for rendering)  
-    * [Finally, Gaussian Splatting in TouchDesigner\!](https://www.youtube.com/watch?v=es5Vy0VTJ8M)  
+    * [Light Up Gaussian Splatting!!](https://www.youtube.com/watch?v=axY-a_1TNng) (uses Unreal for rendering)  
+    * [Finally, Gaussian Splatting in TouchDesigner!](https://www.youtube.com/watch?v=es5Vy0VTJ8M)  
+    * [Gaussian Splatting in POPs - Component use and creative experimentation tutorial](https://www.youtube.com/watch?v=t2ixnJ7vWjk)  
+    * https://rd.nytimes.com/projects/gaussian-splatting-guide/
   * Kinect Azure  
     * [Kinect Azure Point Cloud in TouchDesigner - TouchDesigner Tutorial 068](https://www.youtube.com/watch?v=P_PjAr2Yzao)  
     * [3 methods for visualizing Kinect skeleton](https://www.youtube.com/watch?v=ETQLq1EvXJI)  
     * [Kinect Skeleton Basics - TouchDesigner Tutorial](https://www.youtube.com/watch?v=zW7iHrU_f3c)  
   * Pro display output  
-    * [https://docs.derivative.ca/Direct\_Display\_Out\_TOP](https://docs.derivative.ca/Direct_Display_Out_TOP)   
-    * [https://docs.derivative.ca/Blackmagic\_Design](https://docs.derivative.ca/Blackmagic_Design)   
+    * [https://docs.derivative.ca/Direct_Display_Out_TOP](https://docs.derivative.ca/Direct_Display_Out_TOP)   
+    * [https://docs.derivative.ca/Blackmagic_Design](https://docs.derivative.ca/Blackmagic_Design)   
   * Bookmarked  
     * Engine  
       * [https://interactiveimmersive.io/blog/touchdesigner-operators-tricks/the-overhauled-engine-comp-in-touchdesigner/](https://interactiveimmersive.io/blog/touchdesigner-operators-tricks/the-overhauled-engine-comp-in-touchdesigner/)   
-      * [https://derivative.ca/UserGuide/Engine\_COMP](https://derivative.ca/UserGuide/Engine_COMP)   
+      * [https://derivative.ca/UserGuide/Engine_COMP](https://derivative.ca/UserGuide/Engine_COMP)   
     * [https://docs.python.org/3/tutorial/appetite.html](https://docs.python.org/3/tutorial/appetite.html)   
-    * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User\_Interface/2-3-Transport-Controls.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User_Interface/2-3-Transport-Controls.html)   
+    * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User_Interface/2-3-Transport-Controls.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/User_Interface/2-3-Transport-Controls.html)   
     * [https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/TOPs/3-3-Preloading-Movies.html](https://nvoid.gitbooks.io/introduction-to-touchdesigner/content/TOPs/3-3-Preloading-Movies.html)   
     * [https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/using-the-shuffle-chop/](https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/using-the-shuffle-chop/)   
     * [https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/](https://learn.derivative.ca/courses/200-intermediate/lessons/203-chops-intermediate/topic/sequencing-events-with-the-timer-chop/) - timer & text from dat  
     * [https://matthewragan.com/2015/03/29/ame-394-simple-vj-set-up-touchdesigner/](https://matthewragan.com/2015/03/29/ame-394-simple-vj-set-up-touchdesigner/)   
     * [https://alltd.org/uploader/davidbraun/](https://alltd.org/uploader/davidbraun/)   
-      * [https://github.com/DBraun/TouchDesigner\_Shared/blob/master/Audio/low\_pass\_analysis.tox](https://github.com/DBraun/TouchDesigner_Shared/blob/master/Audio/low_pass_analysis.tox)   
-      * [https://github.com/DBraun/TouchDesigner\_Shared/tree/master/TOPs](https://github.com/DBraun/TouchDesigner_Shared/tree/master/TOPs)	  
+      * [https://github.com/DBraun/TouchDesigner_Shared/blob/master/Audio/low_pass_analysis.tox](https://github.com/DBraun/TouchDesigner_Shared/blob/master/Audio/low_pass_analysis.tox)   
+      * [https://github.com/DBraun/TouchDesigner_Shared/tree/master/TOPs](https://github.com/DBraun/TouchDesigner_Shared/tree/master/TOPs)	  
     * [Voronoi tricks in Touchdesigner](https://www.youtube.com/watch?v=54amDdU0eus)  
     * [Exploding Star - constraining a particle system to a sphere TOUCHDESIGNER TUTORIAL](https://www.youtube.com/watch?v=WS2Ww6zYgJw)  
     * [Dynamic Texture Grids – TouchDesigner Tutorial 62](https://www.youtube.com/watch?v=Eq5amV7obwg)  
     * [Depth Of Field (Tilt Shift) – TouchDesigner Tips, Tricks and FAQs 3](https://www.youtube.com/watch?v=EIBGGIdUJyc)  
     * [TouchDesigner | Working with Midi 3/4](https://www.youtube.com/watch?v=cPvjeikyP-A&list=PLH-IBHIXahauD5cS7NA2YgkGV0FNcSQPM&index=18) - matt ragan  
-    * [Circularization\_tut\_01](https://www.youtube.com/watch?v=7rHGF0wr0Ck) - newnome beauton  
+    * [Circularization_tut_01](https://www.youtube.com/watch?v=7rHGF0wr0Ck) - newnome beauton  
     * [16 – Instancing – TouchDesigner Beginner Course](https://www.youtube.com/watch?v=rYet0SwTYa0) - elekktronaut  
     * [3/3 TouchDesigner Vol.035 Cooking, Optimization, & SceneChanger](https://www.youtube.com/watch?v=TBI-yq_iE60)  
     * [14 – Palette – TouchDesigner Beginner Course](https://www.youtube.com/watch?v=9RE2iKzRHAg&list=PLFrhecWXVn5862cxJgysq9PYSjLdfNiHz&index=31)  
@@ -177,6 +179,7 @@
       * [POPs Experimental: Line MAT Trails in TouchDesigner](https://www.youtube.com/watch?v=A5upp-S8Qaw)
       * [GLSL for POPs in TouchDesigner: Lesson 0 (Introduction to GLSL for POPs)](https://www.youtube.com/watch?v=s4_xHUEfWlI)
       * [3D Raycasting - TouchDesigner](https://www.youtube.com/watch?v=tls7KgzopEw)
+      * [TouchDesigner POP Attributes 101](https://www.youtube.com/watch?v=CVPAA0CPvuA)
     * [How I Build TouchDesigner Apps in 2025 – Python, State Machines, Extensions](https://www.youtube.com/watch?v=nQT7EhYCVg0)✅  
     * [Smooth Point Cloud Sprinkles with UV Unwrapping in TouchDesigner](https://www.youtube.com/watch?v=U0JRJHGIRug)  
     * [3 ASCII Patterns - WEBCAM, NOISE, Input Movie: Touchdesigner Tutorial](https://www.youtube.com/watch?v=_hPY1hFSa64) ✅  
@@ -193,6 +196,7 @@
     * [CHOP Anatomy: Building-blocks of a CHOP [Part 1]](https://www.youtube.com/watch?v=r0dVSn-ZFPw)  
     * [Format Bending #1 - Image2Audio2Image/wavetable weirdness](https://www.youtube.com/watch?v=NtpqL53gyqc)  
     * [Organic Growth - TouchDesigner Tutorial 07](https://www.youtube.com/watch?v=ZWwWxIXHubM)
+    * [How to Build a Sphere Rolling Along Twisted Bricks with POPX](https://youtu.be/Tz2GzJAijEk)
     * Unreal integrations  
       * [TouchDesigner and Unreal Engine Integrations](https://www.youtube.com/watch?v=Nd9Ld-R_AxA) (gpu particles)  
 * Channels  
@@ -234,9 +238,10 @@
   * [https://www.youtube.com/@ab_out7036/videos](https://www.youtube.com/@ab_out7036/videos)   
   * [https://www.youtube.com/@as_ws/videos](https://www.youtube.com/@as_ws/videos)   
   * [https://www.youtube.com/@OkamirufuV/videos](https://www.youtube.com/@OkamirufuV/videos)   
-  * [https://www.youtube.com/@Diogo_888/videos](https://www.youtube.com/@Diogo_888/videos) - typography\!  
+  * [https://www.youtube.com/@Diogo_888/videos](https://www.youtube.com/@Diogo_888/videos) - typography!  
   * [https://www.youtube.com/@FactorySettings/videos](https://www.youtube.com/@FactorySettings/videos)   
   * [https://www.youtube.com/@g3n0m4_xyz/videos](https://www.youtube.com/@g3n0m4_xyz/videos)	  
   * [https://www.youtube.com/@unveil7762/videos](https://www.youtube.com/@unveil7762/videos)   
   * [https://www.youtube.com/@xtalcalx](https://www.youtube.com/@xtalcalx) 
   * [https://www.youtube.com/@sarv.live7](https://www.youtube.com/@sarv.live7) 
+  * [https://www.youtube.com/@zoon_works](https://www.youtube.com/@zoon_works) 

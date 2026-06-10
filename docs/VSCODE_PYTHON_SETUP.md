@@ -2,14 +2,16 @@
 
 ---
 
-## Vanilla project (no haxlib)
+## Vanilla project (no haxlib or TDPyEnvManager)
 
-Point VS Code directly at TD's Python interpreter. This gives you Pylance autocomplete and type hints for all built-in TD objects via the `tdi` stubs.
+Point VS Code directly at TD's Python interpreter. This gives you Pylance autocomplete and type hints for all built-in TD objects via the `tdi` stubs. This uses the 2025 addition of [TDI_Library](https://derivative.ca/UserGuide/TDI_Library) in TouchDesigner.
 
 `.vscode/settings.json`:
 ```json
 {
-  "python.defaultInterpreterPath": "C:/Program Files/Derivative/TouchDesigner/bin/python.exe"
+  "python.defaultInterpreterPath": "C:/Program Files/Derivative/TouchDesigner/bin/python.exe",
+  "editor.insertSpaces": false,
+  "editor.tabSize": 4
 }
 ```
 
@@ -18,6 +20,9 @@ No venv, no extra steps. TD's Python is the interpreter so all TD-shipped packag
 ---
 
 ## Full setup — haxlib / TDPyEnvManager
+
+Using [tdPyEnvManager](https://derivative.ca/UserGuide/Palette:tdPyEnvManager) and the [TDPyEnvManagerHelper](https://derivative.ca/UserGuide/TDPyEnvManagerHelper) class, you can also set up a more advanced Python development environment with virtual environments, allowing you to manage dependencies and keep your development environment organized. This is especially useful if you're working on multiple TD projects or developing libraries that have their own dependencies.
+
 
 ### First-time project setup steps
 
@@ -31,9 +36,10 @@ No venv, no extra steps. TD's Python is the interpreter so all TD-shipped packag
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
   "python.analysis.extraPaths": [
-    "${workspaceFolder}/python",
+    "${workspaceFolder}/python/stubs",
+    "${workspaceFolder}/python/app",
+    "${workspaceFolder}/python/scripts",
     "${workspaceFolder}/python/util",
-    "${workspaceFolder}/python/extensions",
     "${workspaceFolder}/python/net",
     "C:/Program Files/Derivative/TouchDesigner/bin/Lib/site-packages",
     "C:/Program Files/Derivative/TouchDesigner/bin/Lib",
@@ -46,13 +52,13 @@ No venv, no extra steps. TD's Python is the interpreter so all TD-shipped packag
 
 ```yaml
 extraPaths:
-  - python
+  - python/app
+  - python/scripts
   - python/util
-  - python/extensions
   - python/net
 ```
 
-6. **Use `td.reloadModules()`** during development to refresh cached local modules after edits (see below)
+1. **Use `td.reloadModules()`** during development to refresh cached local modules after edits (see below)
 
 ---
 

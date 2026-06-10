@@ -1,0 +1,180 @@
+---
+name: Harness Engineering Setup
+description: Set up a shared foundation for AI coding agents in this repository, including a unified prompts system and agent instructions.
+---
+
+Reusable foundation for building a repository docs system that works for both humans and coding agents.
+
+## Purpose
+
+Use repository docs as the source of truth, with a short root entry file (`AGENTS.md` or `CLAUDE.md`) as a map. This gives agents progressive disclosure: start small, then follow links into deeper docs only when needed.
+
+This concept was adapted from this article: https://openai.com/index/harness-engineering/
+
+## Core Rules
+
+1. Keep the root agent doc short (target: 80-140 lines).
+2. Put durable, detailed knowledge in `docs/` files.
+3. Split docs by intent:
+- `design-docs/` for why decisions were made.
+- `product-specs/` for feature behavior.
+- `exec-plans/` for active/completed work and debt.
+- `references/` for implementation guides and integrations.
+4. Every major doc links to adjacent docs.
+5. No empty files. If a section is unknown, mark it `TODO` with an owner.
+6. Prefer moving existing docs with history (`git mv`) over rewriting from scratch.
+
+## Canonical Structure
+
+```text
+AGENTS.md or CLAUDE.md          <-- short map only (~100 lines)
+docs/
+  ARCHITECTURE.md
+  COMMANDS.md
+  DESIGN.md
+  FRONTEND.md
+  BACKEND.md
+  PRODUCT_SENSE.md
+  QUALITY_SCORE.md
+  RELIABILITY.md
+  SECURITY.md
+  design-docs/
+    index.md
+    core-beliefs.md
+    <domain-decision>.md
+  product-specs/
+    index.md
+    <feature>.md
+  exec-plans/
+    roadmap.md
+    implementation.md
+    tech-debt-tracker.md
+    active/
+    completed/
+  references/
+    <integration>.md
+    <patterns>.md
+  generated/
+    <schema-or-api-doc>.md
+```
+
+## Required Content Contract
+
+Use this as the minimum definition of done.
+
+### Root Agent Map (`AGENTS.md` or `CLAUDE.md`)
+
+- Project one-liner.
+- Quick start commands.
+- Key directories.
+- Environment constraints.
+- Link table to architecture and core docs.
+- Pointers to all `docs/*` domains.
+- Explicit instruction: "When changing code behavior, update the corresponding doc in `docs/`."
+
+### `docs/ARCHITECTURE.md`
+
+- System context diagram (text is fine).
+- Data ownership model.
+- End-to-end flow for the core action.
+- Domain boundaries and directory map.
+- Top architecture decisions with rationale.
+
+### `docs/*.md` Top-Level
+
+- `COMMANDS.md`: all build/run/test/dev/release commands.
+- `DESIGN.md`: product and design principles.
+- `FRONTEND.md`: UI architecture and state patterns.
+- `BACKEND.md`: data model and service/backend patterns.
+- `PRODUCT_SENSE.md`: users, value props, product tradeoffs.
+- `QUALITY_SCORE.md`: quality rubric and current scores/gaps.
+- `RELIABILITY.md`: failure modes, retries, resilience patterns.
+- `SECURITY.md`: auth, authz, privacy, moderation, validation.
+
+### `design-docs/`
+
+- `index.md` with table: doc, status, owner, last reviewed.
+- One file per important design decision.
+- Each doc includes: context, options, decision, consequences.
+
+### `product-specs/`
+
+- `index.md` with table: feature, status, owner, linked code.
+- One file per feature: user story, flows, data shape, edge cases.
+- Include explicit out-of-scope list.
+
+### `exec-plans/`
+
+- `active/`: plans in progress with decision log.
+- `completed/`: completed plans with results and follow-ups.
+- `tech-debt-tracker.md`: debt item, impact, owner, priority, target date.
+
+### `references/`
+
+- Deep technical guides used by agents while coding.
+- Prefer implementation facts over prose.
+- Include commands, paths, and caveats.
+
+## Rollout Workflow (Per Project)
+
+1. Inventory existing docs and group by intent.
+2. Create target tree and move files with `git mv`.
+3. Rewrite root agent doc into a TOC-style map.
+4. Create/fill missing core docs (`docs/*.md` including `ARCHITECTURE.md`).
+5. Normalize cross-links and relative paths.
+6. Add CI checks for structure, broken links, and stale markers.
+7. Add a recurring doc-gardening task (weekly or per release).
+
+## CI + Mechanical Enforcement
+
+Add checks for:
+
+1. Required file presence.
+2. Broken internal links.
+3. Empty files or sections.
+4. Staleness policy (`Last reviewed` age threshold).
+5. Plan hygiene (`active/` plan must have status + owner).
+6. Ownership metadata on core docs.
+
+## Agent Prompt Foundation (Reusable)
+
+Use this as the seed prompt when applying the method to a new repository:
+
+```md
+Restructure this repository docs into a "system of record" model for agents and humans.
+
+Goals:
+1) Keep `AGENTS.md` (or `CLAUDE.md`) short (~100 lines) as a map only.
+2) Move deep knowledge into a structured `docs/` tree.
+3) Ensure progressive disclosure with strong cross-links.
+4) Preserve history with `git mv` where possible.
+5) Produce detailed docs (no empty files).
+
+Target structure:
+- Root: `AGENTS.md`/`CLAUDE.md` (short map only)
+- `docs/`: `ARCHITECTURE.md`, `COMMANDS.md`, `DESIGN.md`, `FRONTEND.md`, `BACKEND.md`,
+  `PRODUCT_SENSE.md`, `QUALITY_SCORE.md`, `RELIABILITY.md`, `SECURITY.md`
+- `docs/design-docs/`, `docs/product-specs/`, `docs/exec-plans/`, `docs/references/`
+
+Execution requirements:
+- Start by inventorying current docs and proposing exact file moves.
+- Then implement moves/rewrites and create missing docs.
+- Add/update indexes for `design-docs` and `product-specs`.
+- Update all internal links.
+- End with a coverage report: what was created, moved, and still missing.
+```
+
+## Review Checklist
+
+1. Can a new engineer find core architecture in under 2 minutes?
+2. Can an agent start from root doc and navigate to any feature spec quickly?
+3. Does each major feature have one canonical spec?
+4. Are active plans and debt items visible and current?
+5. Are quality, reliability, and security expectations explicit?
+6. Do docs match real code paths and current commands?
+
+## Governance
+
+- Owners: assign one owner per core doc.
+- Cadence: review core docs monthly; plans weekly while active.
+- Rule: code changes that alter behavior must update corresponding spec/docs in same PR.

@@ -1,0 +1,2 @@
+# Ensure git hooks have LF endings on all platforms
+.githooks/* text eol=lf
