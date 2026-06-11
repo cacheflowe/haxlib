@@ -1,2 +1,2 @@
 #!/bin/sh
-node .ai/sync.js
+node .ai/scripts/sync.js
