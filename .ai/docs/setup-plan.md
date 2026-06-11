@@ -9,7 +9,7 @@ Tool-specific configurations are treated as transient compilation targets. A nat
 Key consolidation decisions:
 
 - **One agent brief.** `.ai/agents.md` is the canonical instructions file, linked to root `AGENTS.md` (the de-facto cross-tool standard read by Codex CLI, Cursor, Copilot coding agent, Amp, Jules, and others), `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI), and `.github/copilot-instructions.md` (VS Code Copilot).
-- **One MCP config.** Root `.mcp.json` is read natively by both Claude Code and Copilot/VS Code — good enough; no per-tool MCP generation.
+- **One MCP config.** `.ai/mcp-servers.json` is the single source. ~~Root `.mcp.json` is read natively by both Claude Code and Copilot/VS Code — good enough; no per-tool MCP generation.~~ *(Superseded: per-tool generation was added later — `.codex/config.toml` for Codex and a merge into `.gemini/settings.json` for Gemini CLI, since neither reads `.mcp.json`.)*
 - **One skills folder.** Flat `.ai/skills/*.md` files are compiled into the `<name>/SKILL.md` folder wrappers required by both Claude Code (`.claude/skills/`) and VS Code Copilot (`.github/skills/`).
 - **One prompts folder.** Flat `.ai/prompts/*.md` files become slash commands in both harnesses: `.github/prompts/<name>.prompt.md` (Copilot `/name`) and `.claude/commands/<name>.md` (Claude Code `/name`). Authoring note: stick to portable frontmatter (`description`) and argument placeholders both tools understand (Claude uses `$ARGUMENTS`/`$1`, Copilot uses `${input}` — for shared prompts, prefer plain prose like "the user will specify the target" over placeholders).
 - **No tool-config TOML.** No current harness reads a shared `config.toml`; metadata lives in the markdown files themselves (frontmatter).

@@ -1,3 +1,8 @@
+---
+name: td-skills
+description: Meta-skill for TouchDesigner AI assistance — TD philosophy, Python coding standards, documentation retrieval strategy, class hierarchy, and an index of all other TD skills. Use as a starting point when working on TD code or deciding which skill to consult.
+---
+
 # TouchDesigner AI Assistant Skills
 
 This document provides context and best practices for AI coding assistants working with TouchDesigner projects.

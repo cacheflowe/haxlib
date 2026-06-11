@@ -25,27 +25,34 @@ const WATCH_MODE = process.argv.includes("--watch");
 // Configuration
 // ---------------------------------------------------------------------------
 
-const dirsToCreate = [".claude/commands", ".claude/skills", ".github/prompts", ".github/skills"];
+const dirsToCreate = [
+  ".claude/skills",
+  ".claude/commands", // deprecated — kept for backwards-compat with older Claude Code setups
+  ".github/prompts",
+  ".github/skills",
+  ".agents/skills",
+  ".agents/context",
+  ".codex",
+  ".gemini/commands/run",
+];
 
 // Single source -> single destination
-const fileLinks = [
-  { src: ".ai/mcp-servers.json", dest: ".mcp.json" },
-];
+const fileLinks = [{ src: ".ai/mcp-servers.json", dest: ".mcp.json" }];
 
 // Multiple sources concatenated -> every harness (project-specific first, base second)
 const compositeLinks = {
   sources: [".ai/project.md", ".ai/base.md"],
-  dests: ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"],
+  dests: ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".agents/context/AGENTS.md"],
 };
 
 // Skills: flat .ai/skills/<name>.md -> <target>/<name>/SKILL.md
-const skillTargets = [".claude/skills", ".github/skills"];
+// .claude/skills and .agents/skills also receive prompts (both use skills as the primary mechanism)
+const skillTargets = [".claude/skills", ".github/skills", ".agents/skills"];
 
-// Prompts: .ai/prompts/<name>.md -> slash commands in each harness
-const promptTargets = [
-  { root: ".claude/commands", suffix: ".md" },
-  { root: ".github/prompts", suffix: ".prompt.md" },
-];
+// Prompts: .ai/prompts/<name>.md -> .claude/skills/<name>/SKILL.md (Claude Code)
+//          and .github/prompts/<name>.prompt.md (GitHub Copilot)
+// Note: .claude/commands/ is deprecated — prompts now live in .claude/skills/
+const githubPromptTarget = { root: ".github/prompts", suffix: ".prompt.md" };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,6 +116,28 @@ function syncAsset(src, dest) {
 }
 
 /**
+ * Copy a markdown source into a generated SKILL.md without prepending any
+ * header. Skill frontmatter must remain at the start of the file for scanners.
+ */
+function syncSkillFile(src, dest) {
+  const stats = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stats) {
+    if (stats.isSymbolicLink()) {
+      fs.unlinkSync(dest);
+    } else if (manifest[dest] && manifest[dest] === sha256(dest)) {
+      fs.unlinkSync(dest);
+    } else {
+      console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} - preserving.`);
+      return;
+    }
+  }
+
+  fs.copyFileSync(src, dest);
+  manifest[dest] = sha256(dest);
+  console.log(`  \x1b[32m→\x1b[0m Copied skill: ${dest}`);
+}
+
+/**
  * Remove symlinks in a directory that we no longer generate.
  */
 function cleanStaleLinks(dir, expectedFiles) {
@@ -133,12 +162,12 @@ function cleanStaleLinks(dir, expectedFiles) {
       if (!expected.has(entry.name)) {
         if (skillStats?.isSymbolicLink()) {
           fs.unlinkSync(skillFile);
-          fs.rmdirSync(full);
+          fs.rmSync(full, { recursive: true });
           console.log(`  \x1b[90m✗\x1b[0m Removed stale: ${full}/`);
         } else if (skillStats && manifest[skillFile] && manifest[skillFile] === sha256(skillFile)) {
           fs.unlinkSync(skillFile);
           delete manifest[skillFile];
-          fs.rmdirSync(full);
+          fs.rmSync(full, { recursive: true });
           console.log(`  \x1b[90m✗\x1b[0m Removed stale copy: ${full}/`);
         }
       }
@@ -194,6 +223,186 @@ function writeComposite(sources, dests) {
   });
 }
 
+const TOML_SYNC_MARKER = "# ai-sync-generated";
+
+/**
+ * Convert .ai/mcp-servers.json (MCP JSON format) to a Codex config.toml with
+ * [mcp_servers.*] tables. Ownership is detected via a marker comment at the top.
+ * Guardrails: if the file exists without our marker, it's a user-owned config — preserved.
+ */
+function writeCodexConfig(src, dest) {
+  if (!fs.existsSync(src)) {
+    console.log(`  \x1b[33m!\x1b[0m Source missing: ${src} — skipping.`);
+    return;
+  }
+
+  let content;
+  try {
+    const raw = JSON.parse(fs.readFileSync(src, "utf8"));
+    const servers = raw.mcpServers || raw.mcp_servers || {};
+    const lines = [TOML_SYNC_MARKER, ""];
+    for (const [name, cfg] of Object.entries(servers)) {
+      lines.push(`[mcp_servers.${name}]`);
+      if (cfg.command) lines.push(`command = ${tomlStr(cfg.command)}`);
+      if (cfg.args?.length) lines.push(`args = [${cfg.args.map(tomlStr).join(", ")}]`);
+      if (cfg.env && Object.keys(cfg.env).length) {
+        const pairs = Object.entries(cfg.env)
+          .map(([k, v]) => `${k} = ${tomlStr(v)}`)
+          .join(", ");
+        lines.push(`env = { ${pairs} }`);
+      }
+      lines.push("");
+    }
+    content = lines.join("\n");
+  } catch (err) {
+    console.error(`  \x1b[31m✕\x1b[0m Failed to convert ${src} to TOML:`, err.message);
+    return;
+  }
+
+  const stats = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stats) {
+    if (stats.isSymbolicLink()) {
+      fs.unlinkSync(dest);
+    } else {
+      const existing = fs.readFileSync(dest, "utf8");
+      if (existing === content) {
+        console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
+        return;
+      }
+      if (!existing.startsWith(TOML_SYNC_MARKER)) {
+        console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} — preserving.`);
+        return;
+      }
+    }
+  }
+  fs.writeFileSync(dest, content, "utf8");
+  console.log(`  \x1b[32m→\x1b[0m Generated: ${dest}`);
+}
+
+function tomlStr(s) {
+  return JSON.stringify(String(s));
+}
+
+/**
+ * Merge .ai/mcp-servers.json into Gemini CLI's project settings file
+ * (.gemini/settings.json), which holds MCP servers under the "mcpServers" key
+ * alongside other user settings.
+ * Guardrails:
+ *  - Other top-level keys in settings.json are preserved untouched.
+ *  - User-added servers not present in the source are preserved; same-named
+ *    servers are overwritten (the .ai/ source is authoritative for those).
+ *  - An unparseable existing file is preserved.
+ */
+function writeGeminiSettings(src, dest) {
+  if (!fs.existsSync(src)) {
+    console.log(`  \x1b[33m!\x1b[0m Source missing: ${src} — skipping.`);
+    return;
+  }
+
+  let servers;
+  try {
+    servers = JSON.parse(fs.readFileSync(src, "utf8")).mcpServers || {};
+  } catch (err) {
+    console.error(`  \x1b[31m✕\x1b[0m Failed to parse ${src}:`, err.message);
+    return;
+  }
+
+  let settings = {};
+  const existing = fs.existsSync(dest) ? fs.readFileSync(dest, "utf8") : null;
+  if (existing !== null) {
+    try {
+      settings = JSON.parse(existing);
+    } catch {
+      console.log(`  \x1b[33m!\x1b[0m Unparseable JSON at ${dest} — preserving.`);
+      return;
+    }
+  }
+
+  settings.mcpServers = { ...settings.mcpServers, ...servers };
+  const content = JSON.stringify(settings, null, 2) + "\n";
+  if (existing === content) {
+    console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
+    return;
+  }
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fs.writeFileSync(dest, content, "utf8");
+  console.log(`  \x1b[32m→\x1b[0m Merged mcpServers into: ${dest}`);
+}
+
+/**
+ * Split a markdown file into { description, body } by reading minimal YAML
+ * frontmatter. Only the `description` field is extracted (the only optional
+ * Gemini command field). All other frontmatter is dropped from the body since
+ * Gemini commands don't use it.
+ */
+function parsePromptFrontmatter(src) {
+  const raw = fs.readFileSync(src, "utf8");
+  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  if (!match) return { description: null, body: raw.trim() };
+  const desc = match[1].match(/^description:\s*(.*)$/m);
+  return {
+    description: desc ? desc[1].trim().replace(/^["']|["']$/g, "") : null,
+    body: match[2].trim(),
+  };
+}
+
+/**
+ * Convert .ai/prompts/<name>.md into a Gemini CLI custom command TOML at
+ * .gemini/commands/<name>.toml. The body becomes the required `prompt` field;
+ * the YAML `description` (if present) becomes the optional TOML `description`.
+ * Ownership is marked by a `# ai-sync-generated` first-line comment so
+ * user-edited TOMLs are preserved.
+ */
+function writeGeminiCommand(src, dest) {
+  const { description, body } = parsePromptFrontmatter(src);
+  // TOML multi-line basic strings use triple quotes; escape any triple-quote in body.
+  const safeBody = body.replace(/"""/g, '\\"\\"\\"');
+  const lines = [TOML_SYNC_MARKER, ""];
+  if (description) lines.push(`description = ${tomlStr(description)}`);
+  lines.push(`prompt = """`);
+  lines.push(safeBody);
+  lines.push(`"""`, "");
+  const content = lines.join("\n");
+
+  const stats = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (stats) {
+    if (stats.isSymbolicLink()) {
+      fs.unlinkSync(dest);
+    } else {
+      const existing = fs.readFileSync(dest, "utf8");
+      if (existing === content) {
+        console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
+        return;
+      }
+      if (!existing.startsWith(TOML_SYNC_MARKER)) {
+        console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} — preserving.`);
+        return;
+      }
+    }
+  }
+  fs.writeFileSync(dest, content, "utf8");
+  console.log(`  \x1b[32m→\x1b[0m Generated: ${dest}`);
+}
+
+/**
+ * Remove generated Gemini command files whose source prompt no longer exists.
+ * Preserves any TOML that doesn't carry our marker.
+ */
+function cleanStaleGeminiCommands(dir, expectedNames) {
+  if (!fs.existsSync(dir)) return;
+  const expected = new Set(expectedNames.map((n) => n + ".toml"));
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".toml")) continue;
+    if (expected.has(entry.name)) continue;
+    const full = path.join(dir, entry.name);
+    const existing = fs.readFileSync(full, "utf8");
+    if (existing.startsWith(TOML_SYNC_MARKER)) {
+      fs.unlinkSync(full);
+      console.log(`  \x1b[90m✗\x1b[0m Removed stale: ${full}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -217,46 +426,98 @@ function runSync() {
       console.log(`  \x1b[33m!\x1b[0m Source missing: ${link.src} — skipping.`);
     }
   });
+  writeCodexConfig(".ai/mcp-servers.json", ".codex/config.toml");
+  writeGeminiSettings(".ai/mcp-servers.json", ".gemini/settings.json");
   writeComposite(compositeLinks.sources, compositeLinks.dests);
 
-  console.log("\x1b[34m\n[3/5] Compiling skills for Claude Code + Copilot...\x1b[0m");
+  console.log("\x1b[34m\n[3/5] Compiling skills + prompts for Claude Code + Codex + Copilot...\x1b[0m");
   const skillSources = fs.existsSync(".ai/skills")
     ? fs.readdirSync(".ai/skills", { withFileTypes: true }).filter((item) => item.isFile() && item.name.endsWith(".md"))
     : [];
-
-  const skillNames = skillSources.map((item) => path.basename(item.name, ".md"));
-
-  skillTargets.forEach((targetRoot) => {
-    cleanStaleLinks(targetRoot, skillNames);
-    skillSources.forEach((item) => {
-      const skillName = path.basename(item.name, ".md");
-      const src = path.join(".ai/skills", item.name);
-      const skillDir = path.join(targetRoot, skillName);
-      fs.mkdirSync(skillDir, { recursive: true });
-      syncAsset(src, path.join(skillDir, "SKILL.md"));
-    });
-  });
-
-  console.log("\x1b[34m\n[4/5] Compiling prompts / slash commands...\x1b[0m");
   const promptSources = fs.existsSync(".ai/prompts")
     ? fs
         .readdirSync(".ai/prompts", { withFileTypes: true })
         .filter((item) => item.isFile() && item.name.endsWith(".md"))
     : [];
 
-  promptTargets.forEach(({ root, suffix }) => {
-    const expectedNames = promptSources.map((item) => path.basename(item.name, ".md") + suffix);
-    cleanStaleLinks(root, expectedNames);
-    promptSources.forEach((item) => {
-      const promptName = path.basename(item.name, ".md");
-      const src = path.join(".ai/prompts", item.name);
-      syncAsset(src, path.join(root, promptName + suffix));
+  const skillNames = skillSources.map((item) => path.basename(item.name, ".md"));
+  const promptNames = promptSources.map((item) => path.basename(item.name, ".md"));
+
+  // Warn about name collisions between skills and prompts
+  const collisions = skillNames.filter((n) => promptNames.includes(n));
+  if (collisions.length) {
+    console.warn(
+      `  \x1b[33m!\x1b[0m Name collision between skills and prompts: ${collisions.join(", ")} — skill takes precedence.`,
+    );
+  }
+
+  // Targets that receive both skills and prompts (agents treat them as the same concept)
+  const fullSkillTargets = new Set([".claude/skills", ".agents/skills"]);
+
+  skillTargets.forEach((targetRoot) => {
+    const expectedNames = fullSkillTargets.has(targetRoot) ? [...new Set([...skillNames, ...promptNames])] : skillNames;
+    cleanStaleLinks(targetRoot, expectedNames);
+    skillSources.forEach((item) => {
+      const skillName = path.basename(item.name, ".md");
+      const src = path.join(".ai/skills", item.name);
+      const skillDir = path.join(targetRoot, skillName);
+      fs.mkdirSync(skillDir, { recursive: true });
+      const dest = path.join(skillDir, "SKILL.md");
+      targetRoot === ".agents/skills" ? syncSkillFile(src, dest) : syncAsset(src, dest);
     });
+    // Prompts also land in full-skill targets as SKILL.md
+    if (fullSkillTargets.has(targetRoot)) {
+      promptSources.forEach((item) => {
+        const promptName = path.basename(item.name, ".md");
+        if (collisions.includes(promptName)) return; // skill takes precedence
+        const src = path.join(".ai/prompts", item.name);
+        const skillDir = path.join(targetRoot, promptName);
+        fs.mkdirSync(skillDir, { recursive: true });
+        const dest = path.join(skillDir, "SKILL.md");
+        targetRoot === ".agents/skills" ? syncSkillFile(src, dest) : syncAsset(src, dest);
+      });
+    }
+  });
+
+  // Also write prompts to .claude/commands/ for backwards-compat with older Claude Code setups (deprecated)
+  const expectedCommandNames = promptSources.map((item) => path.basename(item.name, ".md") + ".md");
+  cleanStaleLinks(".claude/commands", expectedCommandNames);
+  promptSources.forEach((item) => {
+    const promptName = path.basename(item.name, ".md");
+    const src = path.join(".ai/prompts", item.name);
+    syncAsset(src, path.join(".claude/commands", promptName + ".md"));
+  });
+
+  console.log("\x1b[34m\n[4/5] Compiling GitHub Copilot prompts...\x1b[0m");
+  const expectedGithubNames = promptSources.map((item) => path.basename(item.name, ".md") + githubPromptTarget.suffix);
+  cleanStaleLinks(githubPromptTarget.root, expectedGithubNames);
+  promptSources.forEach((item) => {
+    const promptName = path.basename(item.name, ".md");
+    const src = path.join(".ai/prompts", item.name);
+    syncAsset(src, path.join(githubPromptTarget.root, promptName + githubPromptTarget.suffix));
+  });
+
+  // Gemini CLI custom commands — TOML at .gemini/commands/run/<name>.toml.
+  // The `run/` subdirectory namespaces them as `/run:<name>`, avoiding name
+  // collisions with auto-discovered skills at `.agents/skills/<name>/SKILL.md`
+  // (which Gemini also reads as `/skill <name>`).
+  cleanStaleGeminiCommands(".gemini/commands", []); // sweep legacy un-namespaced TOMLs
+  cleanStaleGeminiCommands(".gemini/commands/run", promptNames);
+  promptSources.forEach((item) => {
+    const promptName = path.basename(item.name, ".md");
+    const src = path.join(".ai/prompts", item.name);
+    writeGeminiCommand(src, path.join(".gemini/commands/run", promptName + ".toml"));
   });
 
   console.log("\x1b[34m\n[5/5] Saving manifest...\x1b[0m");
   const newManifestJson = JSON.stringify(manifest, null, 2);
-  const existingManifestJson = (() => { try { return fs.readFileSync(MANIFEST_PATH, "utf8"); } catch { return null; } })();
+  const existingManifestJson = (() => {
+    try {
+      return fs.readFileSync(MANIFEST_PATH, "utf8");
+    } catch {
+      return null;
+    }
+  })();
   if (newManifestJson !== existingManifestJson) {
     fs.writeFileSync(MANIFEST_PATH, newManifestJson);
     console.log("  ✓ Manifest updated.");

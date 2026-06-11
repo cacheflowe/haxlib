@@ -1,3 +1,8 @@
+---
+name: td-ai-assisted-coding
+description: Setup guide for AI coding tools in TouchDesigner projects — VS Code IntelliSense via TDI_Library, skills/prompts usage, and td-docs-mcp server configuration. Use when configuring Copilot, Claude Code, or MCP tooling for TD development.
+---
+
 # AI coding tools in TouchDesigner
 
 - [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — TouchDesigner-specific coding context and best practices
