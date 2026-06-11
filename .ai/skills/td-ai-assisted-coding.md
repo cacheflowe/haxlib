@@ -1,8 +1,8 @@
 # AI coding tools in TouchDesigner
 
-- [TD_SKILLS.md](.github/skills/TD_SKILLS.md) — TouchDesigner-specific coding context and best practices
-- [prompts](.github/prompts) — Chat prompts for various coding tasks (cleanup, refactor, etc). Triggered via `/python-cleanup` etc in Copilot chat
-- [to-docs-mcp](.vscode/mcp.json) — Points to [td-docs-mcp](https://github.com/cacheflowe/td-docs-mcp) config for generating TD docs with AI assistance. MCP tools can be directly encouraged/referenced in a VS Code chat by typing `#td-docs-mcp`
+- [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — TouchDesigner-specific coding context and best practices
+- [.ai/prompts](.ai/prompts) — Chat prompts for various coding tasks (cleanup, refactor, etc). Triggered via `/python-cleanup` etc in Copilot chat
+- [to-docs-mcp](.mcp.json) — Points to [td-docs-mcp](https://github.com/cacheflowe/td-docs-mcp) config for generating TD docs with AI assistance. MCP tools can be directly encouraged/referenced in a VS Code chat by typing `#td-docs-mcp`
 
 ## Python / VS Code setup
 
@@ -16,11 +16,11 @@ Use **[TDI_Library](https://derivative.ca/UserGuide/TDI_Library)** by adding `.v
 }
 ```
 
-For more advanced Python development and the full `haxlib` setup, follow the instructions in [VSCODE_PYTHON_SETUP.md](../../../docs/VSCODE_PYTHON_SETUP.md).
+For more advanced Python development and the full `haxlib` setup, follow the instructions in [docs/VSCODE_PYTHON_SETUP.md](docs/VSCODE_PYTHON_SETUP.md).
 
 ## Skills and prompts
 
-The [TD_SKILLS.md](.github/skills/TD_SKILLS.md) file contains TD-specific coding context and best practices that can be referenced in AI prompts. The [prompts](.github/prompts) directory contains example chat prompts for various coding tasks (cleanup, refactor, etc). You can trigger these in Copilot chat by typing the corresponding command, e.g. `/python-cleanup` to trigger the Python cleanup prompt.
+The [.ai/skills/td-skills.md](.ai/skills/td-skills.md) file contains TD-specific coding context and best practices that can be referenced in AI prompts. The [.ai/prompts](.ai/prompts) directory contains example chat prompts for various coding tasks (cleanup, refactor, etc). You can trigger these in Copilot chat by typing the corresponding command, e.g. `/python-cleanup` to trigger the Python cleanup prompt.
 
 ## MCP server configuration
 

@@ -63,7 +63,7 @@ All cross-references inside `.ai/` source files (links to skills, docs, or other
 
 ```markdown
 See [docs/systemArchitecture.md](docs/systemArchitecture.md) and
-[.github/skills/code-reviewer/SKILL.md](.github/skills/code-reviewer/SKILL.md).
+[.ai/skills/code-reviewer.md](.ai/skills/code-reviewer.md).
 ```
 
 Rationale: symlinks resolve relative links from the *link's* location, not the source file's. Since the canonical render targets are at the repo root (`AGENTS.md`) and inside `.github/`/`.claude/`, root-relative links work everywhere the files are consumed. The only place they appear broken is when navigating inside the `.ai/` source file itself in an editor — an acceptable trade-off. In the rare copy-fallback case (locked-down Windows), links break identically in both targets and remain findable by agents.

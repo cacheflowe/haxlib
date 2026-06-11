@@ -1,6 +1,6 @@
 ## How This File Works
 
-This file is **auto-generated** by `.ai/sync.js` by concatenating two source files:
+This file is **auto-generated** by `.ai/scripts/sync.js` by concatenating two source files:
 - `.ai/project.md` — project-specific context (MCP tools, skills, docs, code style)
 - `.ai/base.md` — portable agent instructions, reusable across projects
 
@@ -27,7 +27,7 @@ All cross-references inside `.ai/` source files (links to skills, docs, or other
 
 ```markdown
 See [docs/systemArchitecture.md](docs/systemArchitecture.md) and
-[.github/skills/code-reviewer/SKILL.md](.github/skills/code-reviewer/SKILL.md).
+[.ai/skills/code-reviewer.md](.ai/skills/code-reviewer.md).
 ```
 
 Symlinks resolve relative paths from the *link's location*, not the source file's. Since generated targets land at the repo root (`CLAUDE.md`, `AGENTS.md`) and inside `.github/`/`.claude/`, root-relative links work everywhere the files are consumed. Links may appear broken when navigating the `.ai/` source in an editor — that is expected.
