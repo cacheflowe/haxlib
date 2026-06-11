@@ -151,6 +151,6 @@ TouchDesigner.2025.xxxxx\Samples\Learn\        # Example projects
 
 ## See Also
 
-- [td-ml/SKILL.md](../td-ml/SKILL.md) — ML-specific environment setup (ONNX, PyTorch, CUDA)
-- [td-threading/SKILL.md](../td-threading/SKILL.md) — Threading with external libraries
-- [td-extension-template/SKILL.md](../td-extension-template/SKILL.md) — Extension class pattern
+- [.ai/skills/td-ml.md](.ai/skills/td-ml.md) — ML-specific environment setup (ONNX, PyTorch, CUDA)
+- [.ai/skills/td-threading.md](.ai/skills/td-threading.md) — Threading with external libraries
+- [.ai/skills/td-extension-template.md](.ai/skills/td-extension-template.md) — Extension class pattern

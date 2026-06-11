@@ -165,29 +165,29 @@ op('table1')['rowName', 'colName'].val  # By names
 ## See Also
 
 ### Python Reference
-- [td-python-patterns/SKILL.md](td-python-patterns/SKILL.md) — Code patterns by task (DAT tables, CHOP channels, SOP geometry, extensions, storage, time)
-- [td-common-mistakes/SKILL.md](td-common-mistakes/SKILL.md) — Mistake/correction pairs for anti-hallucination
-- [td-snippets/SKILL.md](td-snippets/SKILL.md) — Small utility snippets (debugging, string formatting, connectors)
-- [td-python-style/SKILL.md](td-python-style/SKILL.md) — Python coding conventions (naming, type hints, file org)
-- [td-delayed-function-call/SKILL.md](td-delayed-function-call/SKILL.md) — `run()` patterns for delayed execution
+- [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) — Code patterns by task (DAT tables, CHOP channels, SOP geometry, extensions, storage, time)
+- [.ai/skills/td-common-mistakes.md](.ai/skills/td-common-mistakes.md) — Mistake/correction pairs for anti-hallucination
+- [.ai/skills/td-snippets.md](.ai/skills/td-snippets.md) — Small utility snippets (debugging, string formatting, connectors)
+- [.ai/skills/td-python-style.md](.ai/skills/td-python-style.md) — Python coding conventions (naming, type hints, file org)
+- [.ai/skills/td-delayed-calls.md](.ai/skills/td-delayed-calls.md) — `run()` patterns for delayed execution
 
 ### Architecture
-- [td-oop/SKILL.md](td-oop/SKILL.md) — OOP concepts in TD (COMPs as classes, cloning, global refs)
-- [td-extension-template/SKILL.md](td-extension-template/SKILL.md) — Full extension template with StorageManager and lifecycle
-- [td-replicator/SKILL.md](td-replicator/SKILL.md) — Replicator COMP patterns
-- [td-wiring/SKILL.md](td-wiring/SKILL.md) — Programmatic node wiring (connectors, multi-input, COMP connections)
+- [.ai/skills/td-oop.md](.ai/skills/td-oop.md) — OOP concepts in TD (COMPs as classes, cloning, global refs)
+- [.ai/skills/td-extension-template.md](.ai/skills/td-extension-template.md) — Full extension template with StorageManager and lifecycle
+- [.ai/skills/td-replicator.md](.ai/skills/td-replicator.md) — Replicator COMP patterns
+- [.ai/skills/td-wiring.md](.ai/skills/td-wiring.md) — Programmatic node wiring (connectors, multi-input, COMP connections)
 
 ### GLSL
-- [td-glsl/SKILL.md](td-glsl/SKILL.md) — GLSL reference (built-in uniforms, functions, samplers, snippets)
+- [.ai/skills/td-glsl.md](.ai/skills/td-glsl.md) — GLSL reference (built-in uniforms, functions, samplers, snippets)
 
 ### Environment and Infrastructure
-- [td-python-environment/SKILL.md](td-python-environment/SKILL.md) — External modules (conda, venv, sys.path, tdPyEnvManager)
-- [td-threading/SKILL.md](td-threading/SKILL.md) — Threading patterns (queues, subprocess, main-thread safety)
-- [td-ml/SKILL.md](td-ml/SKILL.md) — Machine learning (ONNX, PyTorch, model repos)
+- [.ai/skills/td-python-environment.md](.ai/skills/td-python-environment.md) — External modules (conda, venv, sys.path, tdPyEnvManager)
+- [.ai/skills/td-threading.md](.ai/skills/td-threading.md) — Threading patterns (queues, subprocess, main-thread safety)
+- [.ai/skills/td-ml.md](.ai/skills/td-ml.md) — Machine learning (ONNX, PyTorch, model repos)
 
 ### AI Prompts
-- [prompt-python-cleanup/SKILL.md](../prompts/python-cleanup.prompt.md) — AI prompt for cleaning up TD Python code
-- [prompt-glsl-cleanup/SKILL.md](../prompts/glsl-cleanup.prompt.md) — AI prompt for cleaning up TD GLSL code
+- [.ai/prompts/python-cleanup.md](.ai/prompts/python-cleanup.md) — AI prompt for cleaning up TD Python code
+- [.ai/prompts/glsl-cleanup.md](.ai/prompts/glsl-cleanup.md) — AI prompt for cleaning up TD GLSL code
 
 ### Learning
-- [td-resources/SKILL.md](td-resources/SKILL.md) — Curated tutorials, YouTube channels, and references
+- [.ai/skills/td-resources.md](.ai/skills/td-resources.md) — Curated tutorials, YouTube channels, and references

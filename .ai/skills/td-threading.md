@@ -74,6 +74,48 @@ thread.daemon = True
 thread.start()
 ```
 
+## Shell Script with Main-Thread Continuation
+
+Starting a thread doesn't block — code after `thread.start()` runs immediately on the main thread while the subprocess runs in the background. This is useful when you need to kick off a long-running script and do other work at the same time:
+
+```python
+# https://docs.python.org/3/library/subprocess.html#subprocess.Popen
+
+import threading
+from subprocess import Popen, PIPE, STDOUT
+import system_util  # project-specific module
+
+def run_script():
+	p = Popen(
+		['serve-all.cmd'],
+		cwd='www\\scripts',
+		stdout=PIPE, stderr=STDOUT,
+		shell=True, text=True, bufsize=1
+	)
+	for line in p.stdout:
+		print(line, end='')  # stream output to textport as it arrives
+	p.stdout.close()
+	p.wait()
+
+thread = threading.Thread(target=run_script)
+thread.daemon = True  # thread dies when TD exits
+thread.start()
+
+# These run immediately on the main thread — no waiting for the script to finish
+ip_addr = system_util.get_ip_address()
+system_util.open_url(f'http://{ip_addr}:5173/app-store-distributed/index.html')
+```
+
+**How it works:**
+
+1. `run_script` is passed as the thread's target — it runs on the background thread
+2. `thread.start()` launches the thread and **returns immediately**
+3. The `Popen` loop inside `run_script` streams subprocess output line-by-line to TD's textport as it arrives, without buffering
+4. Meanwhile, `get_ip_address()` and `open_url()` run on the main thread concurrently — no delay waiting for the script
+5. `p.wait()` (on the background thread) blocks until the subprocess exits, then the thread ends cleanly
+
+**Fix applied:** the original code was missing `thread.daemon = True`. Without it, TD can hang on exit waiting for the background thread to finish.
+
 ## Web Server Example
 
 A more complete example showing a threaded HTTP server with start/stop lifecycle:
@@ -143,6 +185,6 @@ class PythonWebServer:
 
 ## See Also
 
-- [td-common-mistakes/SKILL.md](../td-common-mistakes/SKILL.md) — Mistake #8: Threading with TD objects
-- [td-delayed-function-call/SKILL.md](../td-delayed-function-call/SKILL.md) — `run()` for frame-delayed execution
-- [td-python-environment/SKILL.md](../td-python-environment/SKILL.md) — External modules and env setup
+- [.ai/skills/td-common-mistakes.md](.ai/skills/td-common-mistakes.md) — Mistake #8: Threading with TD objects
+- [.ai/skills/td-delayed-calls.md](.ai/skills/td-delayed-calls.md) — `run()` for frame-delayed execution
+- [.ai/skills/td-python-environment.md](.ai/skills/td-python-environment.md) — External modules and env setup

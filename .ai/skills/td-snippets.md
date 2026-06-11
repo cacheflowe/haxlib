@@ -148,5 +148,5 @@ me.time.seconds  # Current timeline seconds
 
 ## See Also
 
-- [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) — Larger code patterns by task
-- [td-common-mistakes/SKILL.md](../td-common-mistakes/SKILL.md) — Common mistakes to avoid
+- [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) — Larger code patterns by task
+- [.ai/skills/td-common-mistakes.md](.ai/skills/td-common-mistakes.md) — Common mistakes to avoid

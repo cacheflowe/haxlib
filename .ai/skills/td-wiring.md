@@ -233,8 +233,8 @@ parent.layout([noise, blur, level], horizontal=True)
 
 ## See Also
 
-- [../td-snippets/SKILL.md](../td-snippets/SKILL.md) — Small utility snippets including basic connector examples
-- [../td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) — Larger code patterns by task
-- [../td-oop/SKILL.md](../td-oop/SKILL.md) — OOP concepts with COMPs as classes
-- [../td-replicator/SKILL.md](../td-replicator/SKILL.md) — Replicator COMP patterns (dynamic node creation)
-- [../TD_SKILLS.md](../TD_SKILLS.md) — Master skill index
+- [.ai/skills/td-snippets.md](.ai/skills/td-snippets.md) — Small utility snippets including basic connector examples
+- [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) — Larger code patterns by task
+- [.ai/skills/td-oop.md](.ai/skills/td-oop.md) — OOP concepts with COMPs as classes
+- [.ai/skills/td-replicator.md](.ai/skills/td-replicator.md) — Replicator COMP patterns (dynamic node creation)
+- [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — Master skill index

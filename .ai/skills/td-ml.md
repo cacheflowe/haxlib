@@ -71,6 +71,9 @@ print(torch.__version__)      # e.g., '2.7.1+cu118'
 
 ```bash
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Or via conda (resolves CUDA runtime automatically):
+conda install conda-forge::cuda-runtime=12.8.0 conda-forge::cudnn=9.7.1.26
 ```
 
 ### Reference Projects
@@ -101,7 +104,7 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 |------|---------------|
 | Depth estimation | [Depth Anything V2](https://aihub.qualcomm.com/models/depth_anything_v2), [ONNX Depth Anything](https://github.com/fabio-sim/Depth-Anything-ONNX) |
 | Segmentation | [BGNet](https://aihub.qualcomm.com/models/bgnet), [MediaPipe Selfie](https://aihub.qualcomm.com/models/mediapipe_selfie), [SAM2](https://github.com/ibaiGorordo/ONNX-SAM2-Segment-Anything) |
-| Pose estimation | [RTMPose](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose), [rtmlib](https://github.com/Tau-J/rtmlib) |
+| Pose estimation | [RTMPose](https://github.com/open-mmlab/mmpose/tree/main/projects/rtmpose), [RTMPose (Qualcomm model)](https://huggingface.co/qualcomm/RTMPose-Body2d/tree/main), [E2Pose (PINTO)](https://github.com/PINTO0309/PINTO_model_zoo/tree/main/333_E2Pose/demo), [rtmlib](https://github.com/Tau-J/rtmlib) |
 | Hand tracking | [MediaPipe Hands](https://huggingface.co/qualcomm/MediaPipe-Hand-Detection/tree/main), [Hand Gesture Recognition](https://github.com/PINTO0309/hand-gesture-recognition-using-onnx) |
 | Face analysis | [CavaFace](https://aihub.qualcomm.com/models/cavaface) |
 | Eye gaze | [EyeGaze](https://aihub.qualcomm.com/models/eyegaze) |
@@ -111,12 +114,14 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 | Video matting | [RobustVideoMatting](https://github.com/PeterL1n/RobustVideoMatting) |
 | Image inpainting | [LAMA Dilated](https://aihub.qualcomm.com/models/lama_dilated) |
 | Foot detection | [FootTrackNet](https://aihub.qualcomm.com/models/foot_track_net) |
+| Vision-language (VLM) | [SmolVLM-256M](https://huggingface.co/HuggingFaceTB/SmolVLM-256M-Instruct) — small, fast VLM |
 
 ### TD-Specific ML Projects
 
 - [TD-ONNX-EX](https://github.com/yeataro/TD-ONNX-EX)
 - [TopArray](https://github.com/IntentDev/TopArray/)
 - [venvBuilderTD](https://github.com/ioannismihailidis/venvBuilderTD/)
+- [madmomTD](https://github.com/ioannismihailidis/madmomTD) — audio analysis (beat tracking, onset detection)
 - [Real-Time ONNX in TD (tutorial)](https://derivative.ca/community-post/real-time-magic-integrating-touchdesigner-and-onnx-models/69856)
 
 ## Tips
@@ -128,5 +133,5 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 
 ## See Also
 
-- [td-threading/SKILL.md](../td-threading/SKILL.md) — Background thread patterns
-- [td-python-environment/SKILL.md](../td-python-environment/SKILL.md) — Installing packages, conda, venv
+- [.ai/skills/td-threading.md](.ai/skills/td-threading.md) — Background thread patterns
+- [.ai/skills/td-python-environment.md](.ai/skills/td-python-environment.md) — Installing packages, conda, venv

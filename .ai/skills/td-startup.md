@@ -1,3 +1,8 @@
+---
+name: td-startup
+description: haxlib App startup sequence — extension init order, Bootstrap config load priorities (.toe → defaults → TSV → .env → OS vars), known issues and silent failures. Use when debugging init order or implementing startup behavior.
+---
+
 # App Startup Sequence
 
 This document describes how the `haxlib` TouchDesigner project initializes, how configuration values flow into AppStore, and known issues to watch for.
@@ -65,7 +70,7 @@ def __init__(self, ownerComp):
 
 #### RegisterSingletons()
 
-Bridges TD extension instances into `sys.modules` so DAT scripts can access them via the singleton pattern (see `VSCODE_PYTHON_SETUP.md`):
+Bridges TD extension instances into `sys.modules` so DAT scripts can access them via the singleton pattern (see `docs/VSCODE_PYTHON_SETUP.md`):
 
 ```python
 App.i = config.register_singleton(self, 'App')
@@ -135,18 +140,6 @@ everything else       → SetString()
 Gotchas:
 - `"yes"`, `"on"`, `"1"`, `"0"` are stored as strings or numbers, **not booleans**. Use `GetBoolean()` to coerce — it accepts `"true"`, `"1"`, and `"1.0"` as True.
 - `.env` loading **overwrites** persisted values — environment config takes precedence (logged via `(overwriting existing key: ...)`)
-
----
-
-## AppStore Internals
-
-AppStore maintains three parallel representations of state:
-
-1. **`self.dependencies`** — dict of `tdu.Dependency` objects. Granular reactivity: only operators listening to a specific key cook when that key changes.
-2. **`self.storeTable`** — DAT table with columns `[key, value, valueType, sender, eventId]`. Any operator watching the whole table cooks on any change.
-3. **`self.numericTable`** — CHOP mirror of numeric values only.
-
-`SetValue()` updates all three in sequence, then calls `NotifyListeners()`.
 
 ---
 
@@ -247,3 +240,8 @@ if self.AppStore.GetString(App.APP_STATE, "NONE") != "NONE":
 - **Validate curState** before the `run()` string in `SetInitialMode()`
 - **Consider explicit logging when .env overwrites a persisted value** — currently silent
 - **Add periodic cleanup of defunct listeners** — currently only runs on `AddListener()`
+
+## See Also
+
+- [.ai/skills/td-appstore.md](.ai/skills/td-appstore.md) — AppStore API reference (getters, setters, listeners, internal nodes)
+- [.ai/skills/td-oop.md](.ai/skills/td-oop.md) — extension pattern and global op references

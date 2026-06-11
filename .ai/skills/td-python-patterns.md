@@ -319,5 +319,5 @@ text = ui.clipboard
 
 ## See Also
 
-- [../TD_SKILLS.md](../TD_SKILLS.md) — Philosophy, retrieval strategy, class hierarchy
-- [td-common-mistakes.md](../td-common-mistakes/SKILL.md) — Mistake/correction pairs
+- [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — Philosophy, retrieval strategy, class hierarchy
+- [.ai/skills/td-common-mistakes.md](.ai/skills/td-common-mistakes.md) — Mistake/correction pairs

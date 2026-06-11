@@ -199,7 +199,7 @@ def onOffToOn(panel, value, prev):
     pass
 ```
 
-**Correct:** Callback signatures are exact. See [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) for the complete list. The three signatures below are illustrative only. Do not infer other callback signatures from these examples — always treat unlisted signatures as unknown and tell the user to verify in the documentation. Key signatures:
+**Correct:** Callback signatures are exact. See [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) for the complete list. The three signatures below are illustrative only. Do not infer other callback signatures from these examples — always treat unlisted signatures as unknown and tell the user to verify in the documentation. Key signatures:
 
 - CHOP Execute: `def onValueChange(channel, sampleIndex, val, prev)`
 - Panel Execute: `def onOffToOn(panelValue)`
@@ -209,5 +209,5 @@ def onOffToOn(panel, value, prev):
 
 ## See Also
 
-- [../TD_SKILLS.md](../TD_SKILLS.md) — Philosophy, retrieval strategy, class hierarchy
-- [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) — Code patterns by task
+- [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — Philosophy, retrieval strategy, class hierarchy
+- [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) — Code patterns by task

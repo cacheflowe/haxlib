@@ -89,5 +89,5 @@ Note: If the table has headers, `me.digits` starts at 1 (row 0 is headers). Adju
 
 ## See Also
 
-- [td-oop/SKILL.md](../td-oop/SKILL.md) — OOP concepts (replicators as class instantiation)
-- [td-python-patterns/SKILL.md](../td-python-patterns/SKILL.md) — Creating/connecting operators
+- [.ai/skills/td-oop.md](.ai/skills/td-oop.md) — OOP concepts (replicators as class instantiation)
+- [.ai/skills/td-python-patterns.md](.ai/skills/td-python-patterns.md) — Creating/connecting operators

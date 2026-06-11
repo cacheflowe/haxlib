@@ -1,3 +1,8 @@
+---
+name: td-appstore
+description: AppStore state management for haxlib — typed API, reactivity system, WebSocket sync, persistence, and Bootstrap load order. Use when reading/writing app state, setting up listeners, or debugging sync behavior.
+---
+
 # AppStore
 
 AppStore is the centralized state management extension for haxlib TouchDesigner projects. It provides a reactive key-value store with type-aware getters/setters, end-of-frame batched notifications, WebSocket synchronization, and file persistence.
@@ -55,7 +60,7 @@ from AppStore import AppStore
 AppStore.i.GetFloat('app_w')   # fully typed, autocomplete works
 ```
 
-Inside `App.py`, use the `@property` pattern instead (see `VSCODE_PYTHON_SETUP.md` for why):
+Inside `App.py`, use the `@property` pattern instead (see `docs/VSCODE_PYTHON_SETUP.md` for why):
 
 ```python
 self.AppStore.GetFloat('app_w')  # resolves via op.AppStore at runtime
@@ -192,8 +197,6 @@ Hard-coded values set after Bootstrap (e.g. `App.AddOpPaths()`) have the highest
 
 ## WebSocket Synchronization
 
-## WebSocket Synchronization
-
 AppStore is designed as part of a multi-app system on a local network, where a central WebSocket server is the authoritative source for shared state. TD apps broadcast their intent to change a value; the server validates and echoes the change back to all connected clients (including the originating one). This **server-as-truth** pattern ensures all clients converge on the same state.
 
 ### Local vs. shared state — when to use `broadcast`
@@ -313,3 +316,8 @@ These operators live inside the AppStore COMP:
 | `constant_active` | constantCHOP | Connection state flag (0/1) |
 | `constant_active_color` | constantTOP | COMP color indicator |
 | `execute_frame_end` | executeDAT | Calls FlushNotifications() at frame end |
+
+## See Also
+
+- [.ai/skills/td-startup.md](.ai/skills/td-startup.md) — full App bootstrap sequence and config load order
+- [.ai/skills/td-oop.md](.ai/skills/td-oop.md) — extension patterns and global op references

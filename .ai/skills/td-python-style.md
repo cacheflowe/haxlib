@@ -190,6 +190,6 @@ For external editing with autocomplete:
 
 ## See Also
 
-- [td-extension-template/SKILL.md](../td-extension-template/SKILL.md) — Full extension boilerplate
-- [td-common-mistakes/SKILL.md](../td-common-mistakes/SKILL.md) — Common coding mistakes
-- [python-cleanup prompt](../../prompts/python-cleanup.prompt.md) — AI prompt for code cleanup
+- [.ai/skills/td-extension-template.md](.ai/skills/td-extension-template.md) — Full extension boilerplate
+- [.ai/skills/td-common-mistakes.md](.ai/skills/td-common-mistakes.md) — Common coding mistakes
+- [python-cleanup prompt](.ai/prompts/python-cleanup.md) — AI prompt for code cleanup
