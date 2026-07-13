@@ -1,0 +1,18 @@
+{
+  "title": "Zoox CES 2025 — App State Usage",
+  "logs": "../logs",
+  "group": "day",
+  "ext": "txt,log",
+  "since": "2025-01-06",
+  "until": "2026-07-27",
+  "state": {
+    "match": "app_state=(\\w+)",
+    "labels": {
+      "attract": "Attract (idle)",
+      "workspace": "Workspace",
+      "chill": "Chill",
+      "nightclub": "Nightclub",
+      "datenight": "Date Night"
+    }
+  }
+}
