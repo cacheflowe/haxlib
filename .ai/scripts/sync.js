@@ -3,23 +3,43 @@
  * Cross-Platform AI Workspace Sync Engine
  *
  * Links (or copies) canonical sources in .ai/ to the locations
- * consumed by Claude Code, VS Code Copilot, Gemini CLI, and others.
+ * consumed by Claude Code, VS Code Copilot, Codex, and Antigravity CLI.
+ *
+ * Antigravity CLI shares Codex's `.agents/` layout (skills at
+ * `.agents/skills/<name>/SKILL.md`, MCP at `.agents/mcp_config.json`), so it
+ * inherits everything we already write for Codex — no separate target paths.
  *
  * Run: node .ai/scripts/sync.js
  * Watch: node .ai/scripts/sync.js --watch
  * Zero external dependencies. Works identically on macOS and Windows.
  */
 
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
+let fs;
+let path;
+let crypto;
+let ROOT;
+let MANIFEST_PATH;
+let WATCH_MODE;
 
-// Always operate from the repo root (script lives at .ai/scripts/sync.js)
-const ROOT = path.resolve(__dirname, "../..");
-process.chdir(ROOT);
+/**
+ * Load Node built-ins in a way that works in both CommonJS and ESM projects.
+ * Also derives repo root from argv[1] so we don't rely on __dirname/import.meta.
+ */
+async function initRuntime() {
+  fs = await import("node:fs");
+  path = await import("node:path");
+  crypto = await import("node:crypto");
 
-const MANIFEST_PATH = path.join(__dirname, "..", ".sync-manifest.json");
-const WATCH_MODE = process.argv.includes("--watch");
+  const scriptPath = path.resolve(process.argv[1] || ".");
+  const scriptDir = path.dirname(scriptPath);
+
+  // Always operate from the repo root (script lives at .ai/scripts/sync.js)
+  ROOT = path.resolve(scriptDir, "../..");
+  process.chdir(ROOT);
+
+  MANIFEST_PATH = path.join(scriptDir, "..", ".sync-manifest.json");
+  WATCH_MODE = process.argv.includes("--watch");
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -33,16 +53,16 @@ const dirsToCreate = [
   ".agents/skills",
   ".agents/context",
   ".codex",
-  ".gemini/commands/run",
 ];
 
-// Single source -> single destination
-const fileLinks = [{ src: ".ai/mcp-servers.json", dest: ".mcp.json" }];
+// Single source -> single destination (MCP linking is handled separately via syncMcpTargets)
+const fileLinks = [];
 
-// Multiple sources concatenated -> every harness (project-specific first, base second)
+// Multiple sources concatenated -> every harness (project-specific first, base second).
+// A generated skills + prompts index section is injected between the two sources.
 const compositeLinks = {
-  sources: [".ai/project.md", ".ai/base.md"],
-  dests: ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".agents/context/AGENTS.md"],
+  sources: [".ai/AGENTS.md", ".ai/_base.md"],
+  dests: ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md", ".agents/context/AGENTS.md"],
 };
 
 // Skills: flat .ai/skills/<name>.md -> <target>/<name>/SKILL.md
@@ -70,7 +90,7 @@ function loadManifest() {
   }
 }
 
-const manifest = loadManifest();
+let manifest = {};
 
 /**
  * Link src -> dest. Symlink where permitted; copy fallback with drift detection.
@@ -178,7 +198,8 @@ function cleanStaleLinks(dir, expectedFiles) {
 const AI_SYNC_MARKER = "<!-- ai-sync-generated -->";
 
 /**
- * Concatenate multiple source files and write to each destination.
+ * Concatenate multiple source files (with an optional generated section
+ * injected after the first source) and write to each destination.
  * Ownership is detected via an embedded marker comment at the end of each
  * generated file — no external manifest needed.
  * Guardrails:
@@ -186,7 +207,7 @@ const AI_SYNC_MARKER = "<!-- ai-sync-generated -->";
  *  - Files containing the marker are our generated copies → refreshed.
  *  - Any other physical file is a human-made local override → preserved.
  */
-function writeComposite(sources, dests) {
+function writeComposite(sources, dests, injectedSection) {
   const parts = sources
     .filter((src) => {
       if (!fs.existsSync(src)) {
@@ -198,6 +219,10 @@ function writeComposite(sources, dests) {
     .map((src) => fs.readFileSync(src, "utf8").trimEnd());
 
   if (parts.length === 0) return;
+
+  if (injectedSection) {
+    parts.splice(1, 0, injectedSection.trimEnd());
+  }
 
   const content = parts.join("\n\n") + "\n\n" + AI_SYNC_MARKER + "\n";
 
@@ -283,132 +308,277 @@ function tomlStr(s) {
   return JSON.stringify(String(s));
 }
 
+function readSkillDescription(skillPath) {
+  const raw = fs.readFileSync(skillPath, "utf8");
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fm) return "No description provided.";
+  const line = fm[1].split(/\r?\n/).find((l) => l.trim().toLowerCase().startsWith("description:"));
+  if (!line) return "No description provided.";
+  return line.replace(/^\s*description\s*:\s*/i, "").trim() || "No description provided.";
+}
+
 /**
- * Merge .ai/mcp-servers.json into Gemini CLI's project settings file
- * (.gemini/settings.json), which holds MCP servers under the "mcpServers" key
- * alongside other user settings.
- * Guardrails:
- *  - Other top-level keys in settings.json are preserved untouched.
- *  - User-added servers not present in the source are preserved; same-named
- *    servers are overwritten (the .ai/ source is authoritative for those).
- *  - An unparseable existing file is preserved.
+ * Description for a project doc: frontmatter `description` if present,
+ * otherwise the first `# ` heading (docs rarely carry frontmatter).
  */
-function writeGeminiSettings(src, dest) {
+function readDocDescription(docPath) {
+  const raw = fs.readFileSync(docPath, "utf8");
+  const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (fm) {
+    const line = fm[1].split(/\r?\n/).find((l) => l.trim().toLowerCase().startsWith("description:"));
+    const desc = line && line.replace(/^\s*description\s*:\s*/i, "").trim();
+    if (desc) return desc;
+  }
+  const h1 = raw.match(/^#\s+(.+)$/m);
+  return h1 ? h1[1].trim() : "No description provided.";
+}
+
+/**
+ * Recursively list markdown files under the project's docs/ folder
+ * (root-relative, forward-slash paths). Returns [] if docs/ doesn't exist.
+ */
+function listDocSources(root = "docs") {
+  if (!fs.existsSync(root)) return [];
+  const results = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile() && entry.name.endsWith(".md")) results.push(full.replace(/\\/g, "/"));
+    }
+  };
+  walk(root);
+  return results;
+}
+
+/**
+ * List configured MCP servers from .ai/mcp-servers.json as index entries.
+ * Informational only — harnesses load MCP from their own generated configs.
+ * Uses an optional `description` key, falling back to the launch command or URL.
+ */
+function listMcpServers(srcPath = ".ai/mcp-servers.json") {
+  if (!fs.existsSync(srcPath)) return [];
+  let config;
+  try {
+    config = JSON.parse(fs.readFileSync(srcPath, "utf8"));
+  } catch {
+    return [];
+  }
+  return Object.entries(config.mcpServers || {}).map(([name, def]) => {
+    const detail =
+      def.description ||
+      (def.command ? `\`${[def.command, ...(def.args || [])].join(" ")}\`` : null) ||
+      def.serverUrl ||
+      def.url ||
+      def.httpUrl ||
+      "No description provided.";
+    return `- **${name}** — ${detail}`;
+  });
+}
+
+/**
+ * Build the generated skills + prompts + docs + MCP index section that gets
+ * injected between .ai/AGENTS.md and .ai/_base.md at compose time. Source files
+ * are never mutated — the index exists only in the generated outputs.
+ */
+function buildIndexSection(skillSources, promptSources, docSources) {
+  const sorted = (lines) => lines.sort((a, b) => a.localeCompare(b, "en", { sensitivity: "base" }));
+  const entries = (dir, items, emptyMsg) => {
+    if (!items.length) return [`- ${emptyMsg}`];
+    return sorted(
+      items.map((item) => {
+        const p = `${dir}/${item.name}`;
+        return `- [${p}](${p}) — ${readSkillDescription(p)}`;
+      }),
+    );
+  };
+  const docEntries = docSources.length
+    ? sorted(docSources.map((p) => `- [${p}](${p}) — ${readDocDescription(p)}`))
+    : ["- No docs found in `docs/`."];
+  const mcpEntries = listMcpServers();
+
+  return [
+    "## Skills, Prompts & Docs Index (auto-generated)",
+    "",
+    "### Skills",
+    "",
+    ...entries(".ai/skills", skillSources, "No skills found in `.ai/skills/`."),
+    "",
+    "### Prompts (slash commands)",
+    "",
+    ...entries(".ai/prompts", promptSources, "No prompts found in `.ai/prompts/`."),
+    "",
+    "### Project Docs",
+    "",
+    ...docEntries,
+    "",
+    "### MCP Servers",
+    "",
+    ...(mcpEntries.length
+      ? sorted(mcpEntries)
+      : ["- No MCP servers configured in [.ai/mcp-servers.json](.ai/mcp-servers.json)."]),
+  ].join("\n");
+}
+
+/**
+ * Convert .ai/mcp-servers.json into Antigravity CLI's workspace MCP profile at
+ * .agents/mcp_config.json. Antigravity uses the standard `{ "mcpServers": ... }`
+ * shape but renames remote-server URL fields:
+ *   legacy `url` or `httpUrl` → modern `serverUrl`.
+ * Ownership is detected by an `_ai_sync_generated` top-level key so a
+ * hand-edited file (without the key) is preserved untouched.
+ */
+function writeAntigravityMCP(src, dest) {
   if (!fs.existsSync(src)) {
     console.log(`  \x1b[33m!\x1b[0m Source missing: ${src} — skipping.`);
     return;
   }
 
-  let servers;
+  let raw;
   try {
-    servers = JSON.parse(fs.readFileSync(src, "utf8")).mcpServers || {};
+    raw = JSON.parse(fs.readFileSync(src, "utf8"));
   } catch (err) {
     console.error(`  \x1b[31m✕\x1b[0m Failed to parse ${src}:`, err.message);
     return;
   }
 
-  let settings = {};
+  const servers = raw.mcpServers || raw.mcp_servers || {};
+  const converted = {};
+  for (const [name, cfg] of Object.entries(servers)) {
+    const next = { ...cfg };
+    if (next.url || next.httpUrl) {
+      next.serverUrl = next.serverUrl || next.url || next.httpUrl;
+      delete next.url;
+      delete next.httpUrl;
+    }
+    converted[name] = next;
+  }
+
+  const payload = { _ai_sync_generated: true, mcpServers: converted };
+  const content = JSON.stringify(payload, null, 2) + "\n";
+
   const existing = fs.existsSync(dest) ? fs.readFileSync(dest, "utf8") : null;
+  if (existing === content) {
+    console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
+    return;
+  }
   if (existing !== null) {
     try {
-      settings = JSON.parse(existing);
+      const existingParsed = JSON.parse(existing);
+      if (!existingParsed._ai_sync_generated) {
+        console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} — preserving.`);
+        return;
+      }
     } catch {
       console.log(`  \x1b[33m!\x1b[0m Unparseable JSON at ${dest} — preserving.`);
       return;
     }
   }
-
-  settings.mcpServers = { ...settings.mcpServers, ...servers };
-  const content = JSON.stringify(settings, null, 2) + "\n";
-  if (existing === content) {
-    console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
-    return;
-  }
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.writeFileSync(dest, content, "utf8");
-  console.log(`  \x1b[32m→\x1b[0m Merged mcpServers into: ${dest}`);
-}
-
-/**
- * Split a markdown file into { description, body } by reading minimal YAML
- * frontmatter. Only the `description` field is extracted (the only optional
- * Gemini command field). All other frontmatter is dropped from the body since
- * Gemini commands don't use it.
- */
-function parsePromptFrontmatter(src) {
-  const raw = fs.readFileSync(src, "utf8");
-  const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
-  if (!match) return { description: null, body: raw.trim() };
-  const desc = match[1].match(/^description:\s*(.*)$/m);
-  return {
-    description: desc ? desc[1].trim().replace(/^["']|["']$/g, "") : null,
-    body: match[2].trim(),
-  };
-}
-
-/**
- * Convert .ai/prompts/<name>.md into a Gemini CLI custom command TOML at
- * .gemini/commands/<name>.toml. The body becomes the required `prompt` field;
- * the YAML `description` (if present) becomes the optional TOML `description`.
- * Ownership is marked by a `# ai-sync-generated` first-line comment so
- * user-edited TOMLs are preserved.
- */
-function writeGeminiCommand(src, dest) {
-  const { description, body } = parsePromptFrontmatter(src);
-  // TOML multi-line basic strings use triple quotes; escape any triple-quote in body.
-  const safeBody = body.replace(/"""/g, '\\"\\"\\"');
-  const lines = [TOML_SYNC_MARKER, ""];
-  if (description) lines.push(`description = ${tomlStr(description)}`);
-  lines.push(`prompt = """`);
-  lines.push(safeBody);
-  lines.push(`"""`, "");
-  const content = lines.join("\n");
-
-  const stats = fs.lstatSync(dest, { throwIfNoEntry: false });
-  if (stats) {
-    if (stats.isSymbolicLink()) {
-      fs.unlinkSync(dest);
-    } else {
-      const existing = fs.readFileSync(dest, "utf8");
-      if (existing === content) {
-        console.log(`  \x1b[90m–\x1b[0m Unchanged: ${dest}`);
-        return;
-      }
-      if (!existing.startsWith(TOML_SYNC_MARKER)) {
-        console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} — preserving.`);
-        return;
-      }
-    }
-  }
-  fs.writeFileSync(dest, content, "utf8");
   console.log(`  \x1b[32m→\x1b[0m Generated: ${dest}`);
-}
-
-/**
- * Remove generated Gemini command files whose source prompt no longer exists.
- * Preserves any TOML that doesn't carry our marker.
- */
-function cleanStaleGeminiCommands(dir, expectedNames) {
-  if (!fs.existsSync(dir)) return;
-  const expected = new Set(expectedNames.map((n) => n + ".toml"));
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".toml")) continue;
-    if (expected.has(entry.name)) continue;
-    const full = path.join(dir, entry.name);
-    const existing = fs.readFileSync(full, "utf8");
-    if (existing.startsWith(TOML_SYNC_MARKER)) {
-      fs.unlinkSync(full);
-      console.log(`  \x1b[90m✗\x1b[0m Removed stale: ${full}`);
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
 
+/**
+ * Sync `.ai/mcp-servers.json` to all three MCP destinations:
+ *   - .mcp.json (symlink — Claude Code + Copilot)
+ *   - .codex/config.toml (generated TOML — Codex)
+ *   - .agents/mcp_config.json (generated JSON — Antigravity CLI)
+ *
+ * When the source is missing or has zero servers, this is a no-op for new
+ * setups, and a *cleanup* for setups that previously had servers: any
+ * generated targets that are still ours (marker / flag / symlink) are
+ * removed so the repo doesn't carry empty stubs.
+ */
+function syncMcpTargets(src) {
+  const codexDest = ".codex/config.toml";
+  const antigravityDest = ".agents/mcp_config.json";
+  const claudeDest = ".mcp.json";
+
+  let servers = {};
+  let sourceExists = fs.existsSync(src);
+  if (sourceExists) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(src, "utf8"));
+      servers = raw.mcpServers || raw.mcp_servers || {};
+    } catch (err) {
+      console.error(`  \x1b[31m✕\x1b[0m Failed to parse ${src}:`, err.message);
+      return;
+    }
+  }
+
+  if (!sourceExists || Object.keys(servers).length === 0) {
+    const reason = sourceExists ? "no servers defined" : "source missing";
+    console.log(`  \x1b[90m–\x1b[0m MCP sync skipped (${reason}).`);
+    removeGeneratedMcpTarget(codexDest, "toml");
+    removeGeneratedMcpTarget(antigravityDest, "json");
+    removeGeneratedMcpTarget(claudeDest, "symlink", src);
+    return;
+  }
+
+  syncAsset(src, claudeDest);
+  writeCodexConfig(src, codexDest);
+  writeAntigravityMCP(src, antigravityDest);
+}
+
+/**
+ * Remove a previously-generated MCP target if we still own it. Ownership
+ * checks per format:
+ *   - toml: first line is `# ai-sync-generated`
+ *   - json: top-level `_ai_sync_generated: true` flag
+ *   - symlink: lstat reports a symlink whose target matches `src`
+ * Anything else is a user-owned file and is preserved untouched.
+ */
+function removeGeneratedMcpTarget(dest, kind, src) {
+  const stats = fs.lstatSync(dest, { throwIfNoEntry: false });
+  if (!stats) return;
+  let owned = false;
+  if (kind === "symlink") {
+    if (stats.isSymbolicLink()) {
+      try {
+        const linkTarget = fs.readlinkSync(dest);
+        const resolved = path.resolve(path.dirname(dest), linkTarget);
+        owned = resolved === path.resolve(src);
+      } catch {
+        owned = false;
+      }
+    }
+  } else if (stats.isFile()) {
+    const existing = fs.readFileSync(dest, "utf8");
+    if (kind === "toml") {
+      owned = existing.startsWith(TOML_SYNC_MARKER);
+    } else if (kind === "json") {
+      try {
+        owned = !!JSON.parse(existing)._ai_sync_generated;
+      } catch {
+        owned = false;
+      }
+    }
+  }
+  if (owned) {
+    fs.unlinkSync(dest);
+    console.log(`  \x1b[33m✕\x1b[0m Removed empty MCP target: ${dest}`);
+  } else {
+    console.log(`  \x1b[33m!\x1b[0m Local override at ${dest} — preserving.`);
+  }
+}
+
 function runSync() {
   console.log("\x1b[34m=== Syncing Cross-Platform AI Workspace ===\x1b[0m\n");
+
+  const skillSources = fs.existsSync(".ai/skills")
+    ? fs.readdirSync(".ai/skills", { withFileTypes: true }).filter((item) => item.isFile() && item.name.endsWith(".md"))
+    : [];
+
+  const promptSources = fs.existsSync(".ai/prompts")
+    ? fs
+        .readdirSync(".ai/prompts", { withFileTypes: true })
+        .filter((item) => item.isFile() && item.name.endsWith(".md"))
+    : [];
 
   console.log("\x1b[34m[1/5] Ensuring directories exist...\x1b[0m");
   dirsToCreate.forEach((dir) => {
@@ -426,20 +596,14 @@ function runSync() {
       console.log(`  \x1b[33m!\x1b[0m Source missing: ${link.src} — skipping.`);
     }
   });
-  writeCodexConfig(".ai/mcp-servers.json", ".codex/config.toml");
-  writeGeminiSettings(".ai/mcp-servers.json", ".gemini/settings.json");
-  writeComposite(compositeLinks.sources, compositeLinks.dests);
+  syncMcpTargets(".ai/mcp-servers.json");
+  writeComposite(
+    compositeLinks.sources,
+    compositeLinks.dests,
+    buildIndexSection(skillSources, promptSources, listDocSources()),
+  );
 
   console.log("\x1b[34m\n[3/5] Compiling skills + prompts for Claude Code + Codex + Copilot...\x1b[0m");
-  const skillSources = fs.existsSync(".ai/skills")
-    ? fs.readdirSync(".ai/skills", { withFileTypes: true }).filter((item) => item.isFile() && item.name.endsWith(".md"))
-    : [];
-  const promptSources = fs.existsSync(".ai/prompts")
-    ? fs
-        .readdirSync(".ai/prompts", { withFileTypes: true })
-        .filter((item) => item.isFile() && item.name.endsWith(".md"))
-    : [];
-
   const skillNames = skillSources.map((item) => path.basename(item.name, ".md"));
   const promptNames = promptSources.map((item) => path.basename(item.name, ".md"));
 
@@ -497,18 +661,6 @@ function runSync() {
     syncAsset(src, path.join(githubPromptTarget.root, promptName + githubPromptTarget.suffix));
   });
 
-  // Gemini CLI custom commands — TOML at .gemini/commands/run/<name>.toml.
-  // The `run/` subdirectory namespaces them as `/run:<name>`, avoiding name
-  // collisions with auto-discovered skills at `.agents/skills/<name>/SKILL.md`
-  // (which Gemini also reads as `/skill <name>`).
-  cleanStaleGeminiCommands(".gemini/commands", []); // sweep legacy un-namespaced TOMLs
-  cleanStaleGeminiCommands(".gemini/commands/run", promptNames);
-  promptSources.forEach((item) => {
-    const promptName = path.basename(item.name, ".md");
-    const src = path.join(".ai/prompts", item.name);
-    writeGeminiCommand(src, path.join(".gemini/commands/run", promptName + ".toml"));
-  });
-
   console.log("\x1b[34m\n[5/5] Saving manifest...\x1b[0m");
   const newManifestJson = JSON.stringify(manifest, null, 2);
   const existingManifestJson = (() => {
@@ -557,8 +709,16 @@ function startWatch() {
 // Main
 // ---------------------------------------------------------------------------
 
-runSync();
-
-if (WATCH_MODE) {
-  startWatch();
+async function main() {
+  await initRuntime();
+  manifest = loadManifest();
+  runSync();
+  if (WATCH_MODE) {
+    startWatch();
+  }
 }
+
+main().catch((err) => {
+  console.error("\x1b[31m✕\x1b[0m Sync failed:", err && err.stack ? err.stack : err);
+  process.exitCode = 1;
+});
