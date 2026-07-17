@@ -657,6 +657,51 @@ def _route_health(request, response, pars, webServerDAT, **_):
 	})
 
 
+def _route_server_info(request, response, pars, webServerDAT, **_):
+	"""Identify the running bridge itself: the Web Server DAT, its Callbacks DAT, and whether
+	that DAT is file-synced (edit-the-file-directly) or an embedded snapshot (needs /dat pushes
+	to update route code). Generalizes the "find the webserver + callbacks DAT" /run probe that
+	otherwise gets rewritten by hand every time this question comes up."""
+	cb = webServerDAT.par.callbacks.eval()
+	info = {
+		'webserver': webServerDAT.path,
+		'port': webServerDAT.par.port.eval(),
+		'active': webServerDAT.par.active.eval(),
+		'callbacksDAT': cb.path if cb else None,
+		'callbacksFile': (cb.par.file.eval() if cb is not None and hasattr(cb.par, 'file') else None),
+		'callbacksSyncFile': (cb.par.syncfile.eval() if cb is not None and hasattr(cb.par, 'syncfile') else None),
+	}
+	_ok_json(response, info)
+
+
+def _route_cookstats(request, response, pars, **_):
+	"""Read-only cook-cost snapshot for a subtree, scan-style like /errors (path/family/recursive
+	or an explicit paths list) instead of /health's fixed comma-separated 'nodes' list. Intended for
+	client-side before/after diffing around a state change (call once, trigger the change, call again,
+	diff the two responses) — deliberately does NOT sleep/wait server-side, since this callback runs
+	on TD's main thread and a blocking sleep here would freeze the whole UI for its duration."""
+	paths_param = _first_param(pars, 'paths') or _first_param(pars, 'path')
+	family = _first_param(pars, 'family')
+	if paths_param and not family and not _first_param(pars, 'recursive'):
+		targets = [_resolve_op(p.strip()) for p in paths_param.split(',') if p.strip()]
+	else:
+		comp = _resolve_op(paths_param) if paths_param else _get_current_network()
+		recursive = _bool_param(pars, 'recursive')
+		nodes = comp.findChildren(includeUtility=True) if recursive else _nodes_in_comp(comp)
+		if family:
+			nodes = [n for n in nodes if n.family == family]
+		targets = nodes
+	stats = [{
+		'path': n.path,
+		'opType': n.opType,
+		'totalCooks': n.totalCooks,
+		'cpuCookTime': n.cpuCookTime,
+		'gpuCookTime': n.gpuCookTime,
+		'cookedThisFrame': n.cookedThisFrame,
+	} for n in targets]
+	_ok_json(response, {'sampledAt': time.time(), 'nodes': stats})
+
+
 def _route_snapshot(request, response, pars, **_):
 	target = _resolve_op(_first_param(pars, 'path'))
 	if not target.isTOP:
@@ -1023,6 +1068,8 @@ _ROUTES = {
 	'/insert':               _route_insert,
 	'/reload':               _route_reload,
 	'/health':               _route_health,
+	'/server-info':          _route_server_info,
+	'/cookstats':            _route_cookstats,
 	'/snapshot':             _route_snapshot,
 	'/chop':                 _route_chop,
 	'/dat':                  _route_dat,

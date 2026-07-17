@@ -257,6 +257,8 @@ Routes are grouped by purpose. All responses set an appropriate `content-type`. 
 | `/bounds` | GET | `paths` (explicit set) or `path` (COMP, bounds its children) | `{minX, minY, maxX, maxY, width, height, count, nodes[]}` |
 | `/errors` | GET | `paths` (explicit, always force-cooks) or `path`/`recursive` (scan, `force=false` by default) | `[{path, opType, errors, warnings}]` — filtered to errored nodes unless `all=true` |
 | `/health` | GET | `nodes` (optional comma-separated paths) | `{cookRate, realTime, webServerCpuCookTime, webServerTotalCooks, nodes[…]}` |
+| `/server-info` | GET | — | `{webserver, port, active, callbacksDAT, callbacksFile, callbacksSyncFile}` — identifies the running bridge itself: is the Callbacks DAT file-synced (edit the file directly) or an embedded snapshot (needs `/dat` pushes)? Check this before deploying route-code changes. |
+| `/cookstats` | GET | `paths` (explicit) or `path`/`family`/`recursive` (scan, same convention as `/errors`/`/flag`) | `{sampledAt, nodes: [{path, opType, totalCooks, cpuCookTime, gpuCookTime, cookedThisFrame}]}` — read-only cook-cost snapshot; call once, trigger a state change, call again, diff client-side. Deliberately doesn't sleep/wait server-side (would freeze the TD UI for the duration). |
 | `/logs` | GET | `limit` (default 50) | Last N request log entries: `{time, method, uri, statusCode, callbackElapsedMs, …}` |
 
 ### Write / Mutate
