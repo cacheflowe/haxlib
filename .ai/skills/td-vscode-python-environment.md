@@ -1,3 +1,8 @@
+---
+name: td-vscode-python-environment
+description: Use when configuring VS Code, Pylance, or virtual environments for TouchDesigner Python projects.
+---
+
 # VS Code Python Setup for TouchDesigner
 
 ---

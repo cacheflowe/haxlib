@@ -207,6 +207,51 @@ def onOffToOn(panel, value, prev):
 
 ---
 
+## 13. Querying / Accessing Utility & Annotation Nodes
+
+**Wrong:**
+```python
+# comment1 has its Utility parameter set to True
+my_node = op('/project1/InstagramPreview/comment1')  # Evaluates to None!
+nodes = op('/project1/InstagramPreview').ops('*')     # Skips utility nodes completely!
+```
+
+**Correct:**
+```python
+# Use parents .children list for direct children
+nodes = op('/project1/InstagramPreview').children      # Includes ALL children including utilities!
+
+# Or use findChildren with includeUtility=True explicitly
+nodes = parent().findChildren(name='comment*', includeUtility=True)
+my_node = nodes[0] if nodes else None
+```
+
+In TouchDesigner, both Comment boxes (`Shift+C`) and Annotation templates (`Shift+A` or `Shift+B`) are built as `annotateCOMP` operators and are classified as "Utility Nodes" (with their custom properties utility set to True internally). TouchDesigner hides utility-flagged nodes from standard direct paths like `op('path')` and generic glob lists. To query, locate, or programmatically delete them, always traverse `.children` or call `.findChildren(includeUtility=True)`.
+
+---
+
+## 14. Performance Misattributions: `cpuCookTime` alone is a False Metric
+
+**Wrong:**
+```python
+# Sorting nodes strictly by raw cpuCookTime to find active bottlenecks
+expensive_nodes = sorted(all_nodes, key=lambda n: n.cpuCookTime) # High noise/false readings!
+```
+
+**Correct:**
+```python
+# Track cook frequency (cooks/second) combined with cook timing to find active overhead
+ms_per_second = cooks_per_second * node.cpuCookTime
+```
+
+`node.cpuCookTime` represents the duration of the **last measured cook** (in milliseconds) and is preserved statically. If a node (e.g. circles, geometry compilation, custom script loads) cooks exactly *once* during startup or edit, its `cpuCookTime` remains high (e.g. `200ms`) forever, even though its frametime cost on succeeding frames is absolute zero! 
+
+In addition, running deep recursive queries (such as `findChildren`) on the main thread blocks execution. During this blockage, other active temporal structures (like audio devices or hardware controllers) get delayed, forcing their subsequent locks to stretch and causing their measured cook times to spike fictitiously. 
+
+Always assess **Active Performance Overhead (ms/sec)** by profiling over a frame window, measuring delta `totalCooks` to determine cooking frequency alongside cook times.
+
+---
+
 ## See Also
 
 - [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — Philosophy, retrieval strategy, class hierarchy

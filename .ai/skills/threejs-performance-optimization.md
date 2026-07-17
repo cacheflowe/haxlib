@@ -1,3 +1,8 @@
+---
+name: threejs-performance-optimization
+description: Use when profiling or optimizing Three.js WebGL or WebGPU rendering performance and resource lifetime.
+---
+
 # Three.js Performance Optimization
 
 > AI assistant skill for writing performant Three.js code (WebGL & WebGPU).

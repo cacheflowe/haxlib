@@ -1,3 +1,8 @@
+---
+name: threejs-react-three-fiber-gpu-particles
+description: Use when building GPU particle systems, shaders, or buffer geometries with React Three Fiber and Three.js.
+---
+
 The magical world of Particles with React Three Fiber and Shaders
 =================================================================
 

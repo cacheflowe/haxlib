@@ -101,7 +101,7 @@ class App:
 		td.reloadModules = config.ReloadModules
 
 	def ReloadModules(self):
-		config.ReloadModules()
+		return config.ReloadModules()
 
 	def LoadSystemEnvVars(self):
 		"""Load OS-level environment variables that may have been set by the launching script

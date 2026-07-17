@@ -105,4 +105,24 @@ def _collect_op_tree(node: td.OP, lines: list, prefix: str, depth: int, max_dept
 		is_last = i == len(children) - 1
 		lines.append(f'{prefix}{"└── " if is_last else "├── "}{child.name} [{child.type}]')
 		_collect_op_tree(child, lines, prefix + ('    ' if is_last else '│   '), depth + 1, max_depth)
-	
+
+def get_network_editor() -> td.Pane:
+	# assume first is the editor we're looking for
+	for p in td.ui.panes:
+		if p.type.name == 'NETWORKEDITOR':
+			return p
+	return None
+
+
+def get_current_network() -> td.baseCOMP:
+	"""Return the COMP currently displayed in a Network Editor pane (prefers the active pane), falling back to project root."""
+	current = td.ui.panes.current
+	if current is not None and current.type.name == 'NETWORKEDITOR':
+		return current.owner
+	pane = get_network_editor()
+	if pane is not None:
+		return pane.owner
+	return td.op('/')
+
+
+

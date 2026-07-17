@@ -131,3 +131,4 @@ def ReloadModules():
 	if skipped:
 		skipped_list = '\n'.join(f'  - {m}' for m in skipped)
 		print(f'[Config] Skipped:\n{skipped_list}')
+	return reloaded, skipped

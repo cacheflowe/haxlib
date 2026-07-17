@@ -1,5 +1,5 @@
 ---
-name: example command
+name: example-command
 description: This is purely to test whether the AI code assistant chat window can see the command.
 ---
 

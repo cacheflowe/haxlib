@@ -1,5 +1,5 @@
 ---
-name: Python Code Cleanup
+name: td-python-cleanup
 description: Clean up selected TouchDesigner Python code using the repository's Python style and API conventions.
 ---
 

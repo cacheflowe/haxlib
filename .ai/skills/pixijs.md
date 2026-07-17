@@ -1,3 +1,8 @@
+---
+name: pixijs
+description: Use when writing GLSL shaders or custom rendering effects in Pixi.js v8 projects.
+---
+
 # PIXI.js Coding Skill
 
 This skill defines best practices for writing GLSL code within Pixi.js projects.

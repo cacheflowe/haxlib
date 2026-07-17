@@ -1,5 +1,5 @@
 ---
-name: GLSL Code Cleanup
+name: td-glsl-cleanup
 description: Clean up selected TouchDesigner GLSL code using the repository's GLSL conventions and framework rules.
 ---
 
