@@ -18,6 +18,8 @@ Read and follow these two skills:
 
 For any TouchDesigner operator or Python-API question, query the **`td-docs-mcp`** MCP server — it holds the near-complete official TD documentation. Use it instead of relying on training data.
 
+After registering it, make one lightweight documentation query to verify that the server is available. Do not treat registration alone as a successful connection.
+
 ## 3. Confirm the connection
 
 The td-http-api server is live at `http://127.0.0.1:9980`. Confirm it now:
@@ -52,4 +54,10 @@ When writing `/run` scripts, save them to a file and POST with `curl --data-bina
 
 ## First action
 
-Confirm the connection, then tell me which network I currently have open. Then wait for what I want to work on.
+Complete the startup checks before waiting for work:
+
+1. Confirm that **`td-http-api`** and **`td-network-craft`** were found and loaded.
+2. Confirm that **`td-docs-mcp`** is available by completing the lightweight documentation query.
+3. Confirm the HTTP bridge with the `/network` request.
+4. Report a concise readiness status for each check. If any check fails, say exactly which one failed and include the relevant error instead of implying that the session is ready.
+5. If the checks pass, tell me which network I currently have open, then wait for what I want to work on.

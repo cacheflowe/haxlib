@@ -46,11 +46,66 @@ Two different reload mechanisms are in play, and mixing them up is the most comm
 
 Hard-won workflow lessons for an agent *using* this API (as opposed to the server-side behavior documented elsewhere):
 
-- **Author `/run` scripts with the Write tool, then `curl --data-binary @file`. Do NOT build them with shell heredocs.** A `<<'EOF'` heredoc mangled backslashes twice this project (`.replace('\\', '/')` arrived as `.replace('\', '/')` → SyntaxError). Write the `.py` to the scratchpad dir, POST it with `--data-binary @path`. Avoid backslashes in the script entirely — `project.folder` is already forward-slash (`D:/workspace/haxlib`), so build paths with `/`.
+- **Author `/run` scripts with the Write tool, then `curl --data-binary @file`. Do NOT build them with shell heredocs.** A `<<'EOF'` heredoc mangled backslashes twice this project (`.replace('\\', '/')` arrived as `.replace('\', '/')` → SyntaxError). Every temporary `/run` script and captured response must be created under the project-local `tmp/` directory — never in the project root, `python/`, `scripts/`, or another source directory. Use a distinctive filename such as `tmp/td_run_inspect_<purpose>.py`, POST it with `--data-binary @d:/workspace/haxlib/tmp/td_run_inspect_<purpose>.py`, and delete it after verification. Before finishing, check that no temporary `.py` probe remains outside `tmp/`. Avoid backslashes in the script entirely — `project.folder` is already forward-slash (`D:/workspace/haxlib`), so build paths with `/`.
 - **Parse `/run` responses as `{output, [error]}`.** Pipe through `python -c` to print `output` and surface `error`. A missing `error` key means success.
 - **A `�`/mojibake in curl output is usually a display artifact, not data corruption.** Non-ASCII (em-dashes, `Δ`, etc.) round-trips fine through TD and `.tox` storage but can render garbled through the curl→python→Windows-console pipe. Before "fixing" a suspected encoding bug, confirm in-process (e.g. `sum(1 for ch in dat.text if ord(ch) > 127)`) — the stored data is usually clean. (That said, ASCII-only is still the safe choice for user-facing text like a `readMe`.)
 - **Never reconfigure or reparent the Web Server DAT you're currently talking through.** Modifying the live server risks cutting your own connection mid-operation. To build/modify server infrastructure, create a *fresh* component, test it on an alternate port (e.g. 9981/9982), verify, then save/swap — leaving the live server untouched until the new one is proven.
 - **Probe hygiene.** Temp COMPs created for inspection/testing should use a distinctive `_`-prefix (`_snippet_probe`, `_verify`, …), be destroyed at the end of the same script that made them, and their destruction verified (`op(path) is None`). Re-run recon after multi-step builds to confirm nothing leaked.
+
+### Resolving the user's current network
+
+Before any user-requested mutation, establish the network currently shown in the TouchDesigner Network Editor. Do not infer it from the previous task, the currently open source file, a similarly named component, or an empty selection.
+
+Use this order:
+
+1. Call `GET /network` without a `path`; its `root` identifies the Network Editor's current COMP and its `nodes` provide the read-only context.
+2. Call `GET /selected` as supporting evidence only. An empty selection does **not** identify the current network, and a selected child does not necessarily mean it is the requested target.
+3. If the default `/network` response fails or cannot be parsed, use a read-only `/run` probe to print the active Network Editor owner path:
+
+   ```python
+   pane = ui.panes.current
+   if pane is None or pane.type.name != 'NETWORKEDITOR':
+     pane = next((p for p in ui.panes if p.type.name == 'NETWORKEDITOR'), None)
+   print(pane.owner.path if pane is not None else '/')
+   ```
+
+4. Re-query `/network?path=<resolved owner>&recursive=false` only after the owner path is known. If that path-specific request fails, report the API error and ask the user to identify the network; do not substitute a similarly named component.
+
+Record the resolved path in the plan and use it explicitly as `parent` for every write request. If the user says "this Base COMP" but the resolved owner is a child network or a different component, pause and clarify before modifying anything. Resolve first, inspect second, mutate last.
+
+### Organizing scattered experiment networks
+
+When asked to clean up a network containing scattered experiments, use this workflow:
+
+1. Query the current network with `GET /network?path=<current>&recursive=false`. Work from direct children only when the request is to organize the current network.
+2. Inspect the response's `wires` and `references` before moving anything. Infer experiment groups from actual connections, referenced helper DATs/CHOPs/MATs, script contents, and clear names; do not group by proximity alone.
+3. Preserve every node's parent. In particular, never move nodes into a `baseCOMP` or another child network just to make the layout look organized. A `networkbox` annotation provides visual grouping without reparenting its enclosed nodes.
+4. Use absolute `/move` requests (`path`, `x`, `y`) when nodes are scattered. Relative group moves are appropriate only when the group's existing internal arrangement is already useful. Choose stable grid columns and row bands, keep connected chains left-to-right, and leave space between experiment bands for annotations.
+5. Create one `networkbox` annotation per coherent experiment with `POST /annotate`, passing its comma-separated `paths`, descriptive `title`, unchanged `parent`, and a modest `pad`. Useful labels describe responsibility, such as `Feedback studies`, `POP geometry`, or `Ramp scripting`.
+6. Validate after moving and annotating: re-query the network, confirm all original nodes still have the intended parent and coordinates, check each annotation's `enclosedOPs`, and verify its visible title through `customPars.titletext.value`.
+
+Keep ambiguous nodes separate rather than inventing a relationship. Existing experiment COMPs generally deserve their own grid cell or clearly labeled group; a connected chain and its referenced helpers belong together; a script DAT may join a group only when its contents clearly identify that subsystem.
+
+#### Deterministic rules for smaller models
+
+Treat network organization as a finite two-pass operation, not an open-ended layout search. Before making changes, record these invariants:
+
+- The current network is the only allowed parent.
+- No node may be moved into a `baseCOMP` or any other child network.
+- Existing wires and parameter references must remain unchanged.
+- The final set of original node paths must equal the initial set; only annotation nodes may be added.
+
+First produce a group manifest before issuing any move requests. Each group should list its node paths, the evidence for the grouping, its grid column/row, and the left-to-right order within the group. Use evidence in this order: direct wires, OP parameter references, DAT contents, existing experiment COMP names, naming similarity, and spatial proximity only as a last resort. If the evidence is ambiguous, mark the node unclassified and leave it separate instead of repeatedly reconsidering it.
+
+Use fixed layout constants rather than inventing coordinates node by node. For example, choose a column spacing, row spacing, within-group node spacing, and annotation padding, then derive absolute `x`/`y` positions from the manifest. Keep connected chains left-to-right and reserve enough empty space around each row for its annotation.
+
+Execute in this exact order:
+
+```text
+inspect -> classify -> move -> validate -> annotate -> validate
+```
+
+After the move pass, compare the original and current direct-child path sets, confirm every node's parent, and verify the expected coordinates. Only then create annotations. After the annotation pass, verify the annotation count, each `enclosedOPs` set, and each visible `customPars.titletext.value`. Do not keep optimizing once these checks pass.
 
 ### Re-exporting the drop-in `.tox`
 
@@ -128,6 +183,29 @@ Earlier testing on a *different* node/expression pair (a Transform TOP's `tx`/`r
 **`/diff` will show noise from any live/animated parameter, and that's expected, not a bug.** A param driven by an expression referencing an oscillating CHOP (e.g. an LFO) will almost always show a different evaluated `value` between a "before" and "after" snapshot, even with zero structural change — the expression and mode stay identical, only the momentary evaluated number differs. Read a `changed` entry's `expr`/`mode` before concluding the param was actually edited; if those match and only `value` differs, that's just the animation ticking, not something the diffed operation did. Also worth knowing: `/tmp` was unreliable in at least one Windows/Git-Bash environment used to build this tool (writes silently hung); the project's actual scratchpad directory worked fine — if snapshot files being written for a `/diff` call mysteriously hang, that's the first thing to check, not the server.
 
 **`/annotate` is the tool for the "group nodes by responsibility, document as you go" workflow.** `Titletext`/`Mode`/`encloseops`/`Bodytext` are genuine built-in `annotateCOMP` parameters (confirmed against TD's own docs, not dependent on any per-project clone/extension setup) — a plain `parent.create('annotateCOMP')` has them directly. `mode='networkbox'` is the lean choice for visual grouping/labeling (spacing sub-networks apart, grouping by responsibility); `mode='annotate'` adds the full title+body+viewer feature set, better suited for actual prose documentation aimed at other developers. Verified live: enclosing `feedback1`+`level1` via `/bounds`' box-computation immediately populated the new annotation's `enclosedOPs` correctly — no extra cook/frame-tick needed.
+
+#### What the user means by "annotation box"
+
+When a user asks for an annotation box around nodes, interpret that as a TouchDesigner **`annotateCOMP` in `networkbox` mode** — a visual backdrop that encloses and labels existing nodes in the current network. It is not a `baseCOMP`, container, subnet, or reparenting operation. The enclosed operators remain where they are and keep their original parent; the box provides organization on the network canvas and can move with its enclosed operators.
+
+Do not substitute these other objects:
+
+- `baseCOMP`: a child network/container. Never use it for visual organization unless the user explicitly asks to restructure the network.
+- `annotateCOMP` with `mode='comment'`: a floating post-it style note, not a group boundary.
+- `annotateCOMP` with `mode='annotate'`: a richer documentation annotation; use it when the user wants substantial title/body/viewer content rather than a simple group box.
+
+For a visual group box, use the current network as `parent` and pass the exact direct-child node paths in `paths`:
+
+```text
+POST /annotate
+  parent=<current network>
+  paths=<comma-separated node paths>
+  mode=networkbox
+  title=<short responsibility label>
+  pad=40..60
+```
+
+The request creates one `annotateCOMP` beside the nodes; it does not move them into a subnetwork. Use one box per coherent experiment, not one box around the entire network. After creation, verify that the returned node has `opType=annotateCOMP`, `customPars.mode.value=networkbox`, the expected `customPars.titletext.value`, and the intended paths in `enclosedOPs`. If `enclosedOPs` is empty or incomplete, check the node coordinates, parent, and paths before creating another box.
 
 ### Standardizing Comments & Annotation Scales
 
