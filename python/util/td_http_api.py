@@ -831,6 +831,50 @@ def _route_comment(request, response, pars, **_):
 	_ok_json(response, [{'path': n.path, 'comment': n.comment} for n in targets])
 
 
+# Every one of these is a plain Python attribute on OP ("Common Flags" in TD's own docs) —
+# never a Par, so /par can never reach them. Only /run (or this generic /flag route) can.
+_KNOWN_OP_FLAGS = frozenset((
+	'activeViewer', 'allowCooking', 'bypass', 'cloneImmune', 'current', 'display',
+	'expose', 'lock', 'python', 'render', 'selected', 'showCustomOnly', 'showDocked',
+	'viewer',
+))
+
+
+def _route_flag(request, response, pars, **_):
+	_require_write_method(request, '/flag')
+	name = _first_param(pars, 'name')
+	if not name:
+		raise ValueError(f"missing required 'name' query parameter (one of: {', '.join(sorted(_KNOWN_OP_FLAGS))})")
+	if name not in _KNOWN_OP_FLAGS:
+		raise ValueError(f"unknown flag '{name}' — must be one of: {', '.join(sorted(_KNOWN_OP_FLAGS))}")
+	value = _bool_param(pars, 'value', True)
+	paths_param = _first_param(pars, 'paths') or _first_param(pars, 'path')
+	family = _first_param(pars, 'family')
+	# Disambiguate 'path' as a single explicit target (no family/recursive given) vs. a
+	# scan root (family and/or recursive given) — mirrors /errors' path+recursive scan mode.
+	if paths_param and not family and not _first_param(pars, 'recursive'):
+		targets = [_resolve_op(p.strip()) for p in paths_param.split(',') if p.strip()]
+	else:
+		comp = _resolve_op(paths_param) if paths_param else _get_current_network()
+		recursive = _bool_param(pars, 'recursive')
+		nodes = comp.findChildren(includeUtility=True) if recursive else _nodes_in_comp(comp)
+		if family:
+			nodes = [n for n in nodes if n.family == family]
+		targets = nodes
+	if not targets:
+		raise ValueError(f"no nodes found to set '{name}' on")
+	for n in targets:
+		setattr(n, name, value)
+	_ok_json(response, [{'path': n.path, name: getattr(n, name)} for n in targets])
+
+
+def _route_bypass(request, response, pars, **_):
+	# Backward-compatible alias: /bypass is /flag pinned to name=bypass.
+	pars = dict(pars)
+	pars['name'] = 'bypass'
+	_route_flag(request, response, pars)
+
+
 def _route_annotate(request, response, pars, **_):
 	_require_write_method(request, '/annotate')
 	paths_param = _first_param(pars, 'paths')
@@ -988,6 +1032,8 @@ _ROUTES = {
 	'/wire':                 _route_wire,
 	'/duplicate':            _route_duplicate,
 	'/comment':              _route_comment,
+	'/bypass':               _route_bypass,
+	'/flag':                 _route_flag,
 	'/annotate':             _route_annotate,
 	'/move':                 _route_move,
 	'/delete':               _route_delete,
