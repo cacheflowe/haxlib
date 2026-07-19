@@ -5,6 +5,7 @@ import re
 import sys
 import time
 import traceback
+import inspect
 
 # ---------------------------------------------------------------------------
 # Network description (self-contained - no td_util dependency, so this file
@@ -685,6 +686,9 @@ Included docs (in order below): {names}
 
 Fetch a single doc instead of all of them with `GET /docs?name=<docname>` (works with or without its
 `docs_` prefix), or list available doc names with `GET /docs?list=true`.
+
+For a live, code-accurate reference of every route this server currently supports (method + one-line
+summary, generated straight from the running handlers rather than this prose), see `GET /routes`.
 """
 
 
@@ -730,6 +734,55 @@ def _route_docs(request, response, pars, webServerDAT, **_):
 		text = n.csv if n.isTable else n.text
 		sections.append(f"<!-- ===== {n.name} ===== -->\n\n{text}")
 	_ok_text(response, '\n\n---\n\n'.join(sections))
+
+
+def _infer_methods(uri, fn, _seen=None):
+	"""Best-effort HTTP method(s) for a route, derived from the handler's compiled bytecode rather
+	than a hand-maintained table that can drift (or inspect.getsource(), which isn't reliable here --
+	TD's DAT-based module loading doesn't expose normal readable source, so every write route came
+	back misclassified as GET-only until this switched to co_names/co_consts). Every write-only route
+	in this file gates on the shared _require_write_method() helper (POST/PUT); /par and /dat are
+	dual-mode (GET always works, POST/PUT optionally, checked inline against the literal 'POST'
+	rather than via that helper, which usually ends up folded into a tuple constant rather than a
+	bare top-level one -- hence the nested-tuple flattening below); /delete checks its own method
+	inline too (POST/DELETE). A route like /bypass that simply delegates to another route's handler
+	(_route_flag) has no write-gate of its own to find, so this recurses one level into any other
+	known handler referenced by name, with a visited-set guard against cycles."""
+	if uri == '/delete':
+		return ['POST', 'DELETE']
+	if '_require_write_method' in fn.__code__.co_names:
+		return ['POST', 'PUT']
+	flat_consts = set()
+	for c in fn.__code__.co_consts:
+		if isinstance(c, tuple):
+			flat_consts.update(c)
+		else:
+			flat_consts.add(c)
+	if 'POST' in flat_consts:
+		return ['GET', 'POST', 'PUT']
+	_seen = _seen or set()
+	_seen.add(fn)
+	for name in fn.__code__.co_names:
+		if name.startswith('_route_') and name in globals():
+			callee = globals()[name]
+			if callable(callee) and callee not in _seen:
+				callee_methods = _infer_methods(uri, callee, _seen)
+				if callee_methods != ['GET']:
+					return callee_methods
+	return ['GET']
+
+
+def _route_routes(request, response, pars, **_):
+	"""Live, code-derived API reference: every currently-registered route, its HTTP method(s),
+	and a one-line summary pulled from its handler's docstring. Generated straight from _ROUTES
+	and the running handlers at request time, so it always matches this exact server instance --
+	unlike the prose in /docs, which documents intent and can drift from the code over time."""
+	entries = []
+	for uri, fn in sorted(_ROUTES.items()):
+		doc = inspect.getdoc(fn)
+		summary = doc.splitlines()[0] if doc else ''
+		entries.append({'uri': uri, 'methods': _infer_methods(uri, fn), 'summary': summary})
+	_ok_json(response, entries)
 
 
 def _route_cookstats(request, response, pars, **_):
@@ -1128,6 +1181,7 @@ _ROUTES = {
 	'/health':               _route_health,
 	'/server-info':          _route_server_info,
 	'/docs':                 _route_docs,
+	'/routes':               _route_routes,
 	'/cookstats':            _route_cookstats,
 	'/snapshot':             _route_snapshot,
 	'/chop':                 _route_chop,
@@ -1163,7 +1217,12 @@ def onHTTPRequest(webServerDAT, request, response):
 	pars = request.get('pars', {})
 
 	try:
-		handler = _ROUTES.get(uri)
+		# A bare '/' (no prior knowledge of any route) is the most likely first request a brand-new
+		# agent makes -- point it at the two self-discovery endpoints instead of a plain 404.
+		if uri in ('/', ''):
+			handler = _route_docs
+		else:
+			handler = _ROUTES.get(uri)
 		if handler is None:
 			response['statusCode'] = 404
 			response['statusReason'] = 'Not Found'
