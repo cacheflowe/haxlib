@@ -7,7 +7,7 @@ import time
 import traceback
 
 # ---------------------------------------------------------------------------
-# Network description (self-contained — no td_util dependency, so this file
+# Network description (self-contained - no td_util dependency, so this file
 # can be dropped into any project as a single Callbacks DAT).
 # ---------------------------------------------------------------------------
 
@@ -23,7 +23,7 @@ def _get_current_network():
 
 
 def _get_network_editor_pane():
-	"""Return the NetworkEditor pane object itself (not its owner) — prefers the active pane."""
+	"""Return the NetworkEditor pane object itself (not its owner) - prefers the active pane."""
 	current = ui.panes.current
 	if current is not None and current.type.name == 'NETWORKEDITOR':
 		return current
@@ -428,7 +428,7 @@ def _require_write_method(request, uri):
 
 
 # ---------------------------------------------------------------------------
-# Templates — reusable network patterns stored as JSON under data/harness/network-templates/.
+# Templates - reusable network patterns stored as JSON under data/harness/network-templates/.
 # See data/harness/network-templates/simple_feedback_loop.json for the schema by example.
 # ---------------------------------------------------------------------------
 
@@ -505,7 +505,7 @@ def instantiate_template(template, parent, x_offset=0.0, y_offset=0.0, name_pref
 
 
 # ---------------------------------------------------------------------------
-# Request logging — in-memory ring buffer, readable via GET /logs.
+# Request logging - in-memory ring buffer, readable via GET /logs.
 # Resets on /reload (module-level state), which is fine for a debugging aid.
 # ---------------------------------------------------------------------------
 
@@ -519,7 +519,7 @@ def _log_request(entry):
 
 
 # ---------------------------------------------------------------------------
-# Route handlers — one function per URI. Each receives (request, response, pars)
+# Route handlers - one function per URI. Each receives (request, response, pars)
 # and writes statusCode / content-type / data into response. webServerDAT is
 # passed only where needed (health, run).
 # ---------------------------------------------------------------------------
@@ -563,7 +563,7 @@ def _route_selected(request, response, pars, **_):
 
 def _route_select(request, response, pars, **_):
 	"""Set the TD UI's node selection (and optionally home the network editor on it) so an
-	agent can direct the user's attention to specific nodes — the write-side mirror of /selected."""
+	agent can direct the user's attention to specific nodes - the write-side mirror of /selected."""
 	_require_write_method(request, '/select')
 	paths_param = _first_param(pars, 'paths') or _first_param(pars, 'path')
 	if not paths_param:
@@ -586,7 +586,7 @@ def _route_select(request, response, pars, **_):
 
 def _route_insert(request, response, pars, **_):
 	"""Splice a new node into an existing connection: create opType, wire the current source of
-	dest's input into it, and wire it into dest — shifting dest and everything to its right to
+	dest's input into it, and wire it into dest - shifting dest and everything to its right to
 	make room. Identifies the connection by dest 'path' + 'input' index (default 0)."""
 	_require_write_method(request, '/insert')
 	dest = _resolve_op(_first_param(pars, 'path'))
@@ -674,11 +674,69 @@ def _route_server_info(request, response, pars, webServerDAT, **_):
 	_ok_json(response, info)
 
 
+_DOCS_PREAMBLE = """# TD HTTP API - Agent Onboarding
+
+You are connected to a live TouchDesigner project over its HTTP bridge (this server, port {port}).
+Everything below is the operating documentation for working with it - read all of it before making
+any changes to the project. It covers the full HTTP route reference, client-side workflow lessons,
+and idiomatic TouchDesigner network-building technique.
+
+Included docs (in order below): {names}
+
+Fetch a single doc instead of all of them with `GET /docs?name=<docname>` (works with or without its
+`docs_` prefix), or list available doc names with `GET /docs?list=true`.
+"""
+
+
+def _route_docs(request, response, pars, webServerDAT, **_):
+	"""Serve the skill docs embedded alongside this server as sibling 'docs_*' Text DATs (per the
+	packaged TdHttpApi.tox) - no filesystem access needed, works identically whether or not the
+	project is file-synced. Intended as a one-shot onboarding URL: a brand-new agent hitting
+	GET /docs with zero prior context gets everything it needs to start operating this bridge."""
+	parent = webServerDAT.parent()
+	all_docs = sorted(
+		(n for n in _nodes_in_comp(parent) if n.isDAT and n.name.startswith('docs_')),
+		key=lambda n: n.name,
+	)
+	if not all_docs:
+		raise ValueError(
+			f"no 'docs_*' DATs found alongside the Web Server DAT at '{parent.path}' - this route "
+			"needs the packaged TdHttpApi.tox's embedded skill docs (missing in a from-scratch manual setup)"
+		)
+	if _bool_param(pars, 'list'):
+		_ok_json(response, {'docs': [n.name for n in all_docs]})
+		return
+	name_filter = _first_param(pars, 'name')
+	if name_filter:
+		# Op names can't contain hyphens (TD forces docs_td-network-craft -> docs_td_network_craft),
+		# so treat '-' and '_' as equivalent when matching a requested doc name against a DAT name.
+		normalized_filter = name_filter.replace('-', '_')
+		matches = [
+			n for n in all_docs
+			if n.name == normalized_filter or n.name == f'docs_{normalized_filter}'
+		]
+		if not matches:
+			raise ValueError(f"no doc named '{name_filter}'. available: {', '.join(n.name for n in all_docs)}")
+		docs_to_serve = matches
+	else:
+		docs_to_serve = all_docs
+	sections = []
+	if not name_filter:
+		sections.append(_DOCS_PREAMBLE.format(
+			port=webServerDAT.par.port.eval(),
+			names=', '.join(n.name for n in all_docs),
+		))
+	for n in docs_to_serve:
+		text = n.csv if n.isTable else n.text
+		sections.append(f"<!-- ===== {n.name} ===== -->\n\n{text}")
+	_ok_text(response, '\n\n---\n\n'.join(sections))
+
+
 def _route_cookstats(request, response, pars, **_):
 	"""Read-only cook-cost snapshot for a subtree, scan-style like /errors (path/family/recursive
 	or an explicit paths list) instead of /health's fixed comma-separated 'nodes' list. Intended for
 	client-side before/after diffing around a state change (call once, trigger the change, call again,
-	diff the two responses) — deliberately does NOT sleep/wait server-side, since this callback runs
+	diff the two responses) - deliberately does NOT sleep/wait server-side, since this callback runs
 	on TD's main thread and a blocking sleep here would freeze the whole UI for its duration."""
 	paths_param = _first_param(pars, 'paths') or _first_param(pars, 'path')
 	family = _first_param(pars, 'family')
@@ -854,7 +912,7 @@ def _route_duplicate(request, response, pars, **_):
 			n.nodeY += ddy
 	elif x is not None or y is not None:
 		if len(copies) != 1:
-			raise ValueError("absolute 'x'/'y' positioning only supports duplicating a single 'path' — use 'dx'/'dy' for multiple")
+			raise ValueError("absolute 'x'/'y' positioning only supports duplicating a single 'path' - use 'dx'/'dy' for multiple")
 		if x is not None:
 			copies[0].nodeX = float(x)
 		if y is not None:
@@ -876,7 +934,7 @@ def _route_comment(request, response, pars, **_):
 	_ok_json(response, [{'path': n.path, 'comment': n.comment} for n in targets])
 
 
-# Every one of these is a plain Python attribute on OP ("Common Flags" in TD's own docs) —
+# Every one of these is a plain Python attribute on OP ("Common Flags" in TD's own docs) -
 # never a Par, so /par can never reach them. Only /run (or this generic /flag route) can.
 _KNOWN_OP_FLAGS = frozenset((
 	'activeViewer', 'allowCooking', 'bypass', 'cloneImmune', 'current', 'display',
@@ -891,12 +949,12 @@ def _route_flag(request, response, pars, **_):
 	if not name:
 		raise ValueError(f"missing required 'name' query parameter (one of: {', '.join(sorted(_KNOWN_OP_FLAGS))})")
 	if name not in _KNOWN_OP_FLAGS:
-		raise ValueError(f"unknown flag '{name}' — must be one of: {', '.join(sorted(_KNOWN_OP_FLAGS))}")
+		raise ValueError(f"unknown flag '{name}' - must be one of: {', '.join(sorted(_KNOWN_OP_FLAGS))}")
 	value = _bool_param(pars, 'value', True)
 	paths_param = _first_param(pars, 'paths') or _first_param(pars, 'path')
 	family = _first_param(pars, 'family')
 	# Disambiguate 'path' as a single explicit target (no family/recursive given) vs. a
-	# scan root (family and/or recursive given) — mirrors /errors' path+recursive scan mode.
+	# scan root (family and/or recursive given) - mirrors /errors' path+recursive scan mode.
 	if paths_param and not family and not _first_param(pars, 'recursive'):
 		targets = [_resolve_op(p.strip()) for p in paths_param.split(',') if p.strip()]
 	else:
@@ -962,7 +1020,7 @@ def _route_move(request, response, pars, **_):
 		if x is None and y is None:
 			raise ValueError("must supply 'x'/'y' (absolute) or 'dx'/'dy' (relative)")
 		if len(targets) != 1:
-			raise ValueError("absolute 'x'/'y' positioning only supports a single 'path' — use 'paths' with 'dx'/'dy' to shift a group")
+			raise ValueError("absolute 'x'/'y' positioning only supports a single 'path' - use 'paths' with 'dx'/'dy' to shift a group")
 		n = targets[0]
 		if x is not None:
 			n.nodeX = float(x)
@@ -1059,7 +1117,7 @@ def _route_diff(request, response, pars, **_):
 	_ok_json_sorted(response, diff_networks(before, after))
 
 
-# Dispatch table — maps URI → handler function.
+# Dispatch table - maps URI → handler function.
 _ROUTES = {
 	'/network':              _route_network,
 	'/network.mmd':          _route_network_mmd,
@@ -1069,6 +1127,7 @@ _ROUTES = {
 	'/reload':               _route_reload,
 	'/health':               _route_health,
 	'/server-info':          _route_server_info,
+	'/docs':                 _route_docs,
 	'/cookstats':            _route_cookstats,
 	'/snapshot':             _route_snapshot,
 	'/chop':                 _route_chop,
