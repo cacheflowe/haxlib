@@ -7,6 +7,14 @@ description: HTTP bridge into a running TouchDesigner project via a Web Server D
 
 `python/util/td_http_api.py` is a self-contained Web Server DAT callback module that exposes a running TouchDesigner project over local HTTP. It's the bridge that lets an AI coding agent (or any external tool) inspect and modify a live `.toe` without going through the Textport or the UI.
 
+## Mandatory Agent Checklist
+
+- **Prioritize atomic routes over monolithic scripts.** Prefer `/create`, `/wire`, `/par`, `/move`, `/comment`, `/flag`, and `/annotate` over `/run`. Use `/run` only when the operation cannot be expressed through existing deterministic routes.
+- **No stacking in multi-node builds.** Always provide explicit `x` and `y` for `/create` in planned multi-node layouts. Do not rely on auto-placement for chain readability; treat `_auto_place` as a fallback only for one-off nodes.
+- **Viewer hygiene.** Ensure user-visible terminal/output nodes are viewable immediately (`viewer=true` at create time, or set viewer/display/render state explicitly via deterministic routes).
+- **No shell heredocs for script payloads.** When `/run` is required, write a real file and send with `--data-binary @file` to avoid escaping/backslash corruption.
+- **Resolve first, mutate second.** Confirm the active network root via `/network` (and `/selected` only as supporting signal) before any write call.
+
 Companion utility: `python/util/td_util.py` holds general-purpose op helpers (node color/size, op-tree printing, current-network lookup) used from the Textport. `td_http_api.py` deliberately does **not** import it — the network-description logic (`describe_network`, `network_to_mermaid`, param serialization) is duplicated inline so this one file can be dropped into any project as a single Callbacks DAT with zero other dependencies.
 
 ---
@@ -263,9 +271,31 @@ Routes are grouped by purpose. All responses set an appropriate `content-type`. 
 | `/health` | GET | `nodes` (optional comma-separated paths) | `{cookRate, realTime, webServerCpuCookTime, webServerTotalCooks, nodes[…]}` |
 | `/server-info` | GET | — | `{webserver, port, active, callbacksDAT, callbacksFile, callbacksSyncFile}` — identifies the running bridge itself: is the Callbacks DAT file-synced (edit the file directly) or an embedded snapshot (needs `/dat` pushes)? Check this before deploying route-code changes. |
 | `/docs` | GET | `name` (optional, hyphen/underscore-insensitive, works with or without the `docs_` prefix), `list` (bool) | Full text of the skill docs embedded alongside this server as sibling `docs_*` Text DATs (per the packaged `TdHttpApi.tox`) — no filesystem access needed. No params returns both docs with an onboarding preamble; `list=true` returns just `{docs: [...]}`. **This is the one-shot cold-start URL**: point a brand-new agent at `GET /` (aliased to this) or `GET /docs` and it has everything needed to start operating the bridge, no prior context required. |
+| `/examples` | GET | `name` (optional DAT name, default `table_td_examples`), `q` (optional substring filter), `offset` (default 0), `limit` (default 50, max 500) | Queryable example database embedded inside the same `TdHttpApi` COMP as a DAT (default `table_td_examples`) so tox-only deployments can still serve curated examples without any external files. Returns `{source, columns, total, offset, limit, returned, rows[]}`. |
+| `/examples.tsv` | GET | `name` (optional DAT name, default `table_td_examples`), `q` (optional substring filter) | Self-contained TSV export of the embedded examples database (`text/tab-separated-values`). Use this to regenerate `data/harness/op-snippets/catalog.tsv` directly from the running bridge with no helper script. |
+| `/examples-refresh` | POST/PUT | `name` (optional DAT name, default `table_td_examples`), `q` (optional filter), `output` (optional file path, default `<project.folder>/data/harness/op-snippets/catalog.tsv`) | Writes the embedded examples catalog to disk from inside `td_http_api` itself. Deterministic replacement for external refresh scripts. Returns `{output, rows, columns, source}`. |
 | `/routes` | GET | — | `[{uri, methods, summary}]` for every currently-registered route — generated live from `_ROUTES` and each handler's actual bytecode/docstring, so it always matches the running server exactly (unlike this prose table, which documents intent and can drift). Use this to check whether a route you remember from a past session still exists, or whether a new one has shown up, before assuming. |
+| `/schema` | GET | `route` (optional URI filter), `examples` (bool, default true) | Machine-readable API contract for this running instance: route methods + summaries for all routes, plus explicit query schema/examples for selected high-risk write routes (`/flag`, `/par`, `/wire`, `/insert`). Use this as preflight validation input so agents can build correct calls on first try instead of probing. |
+| `/smoketest` | GET (default), POST/PUT (when `writeTest=true`) | `writeTest` (bool, default false), `name` (optional examples DAT name) | Built-in functionality smoke check for the running bridge. Default mode is read-only and validates route registration, embedded docs, examples DAT parseability, schema coverage, and runtime state. Optional write mode performs a create/destroy probe and requires POST/PUT. Returns `{passed, checkCount, writeTest, checks[]}`. |
 | `/cookstats` | GET | `paths` (explicit) or `path`/`family`/`recursive` (scan, same convention as `/errors`/`/flag`) | `{sampledAt, nodes: [{path, opType, totalCooks, cpuCookTime, gpuCookTime, cookedThisFrame}]}` — read-only cook-cost snapshot; call once, trigger a state change, call again, diff client-side. Deliberately doesn't sleep/wait server-side (would freeze the TD UI for the duration). |
 | `/logs` | GET | `limit` (default 50) | Last N request log entries: `{time, method, uri, statusCode, callbackElapsedMs, …}` |
+
+### Examples provenance and rebuild source
+
+The examples served by `/examples`, `/examples.tsv`, and `/examples-refresh` are read from the embedded DAT `table_td_examples` inside `TdHttpApi`.
+
+That embedded table ultimately originates from TouchDesigner's built-in OP Snippets catalog table:
+
+- Loader tox: `Samples/Learn/OPSnippets/OPSnippetsOnDemand.tox`
+- Master catalog table inside loader: `snippetsChooser/allAlphaNumeric`
+
+Current lineage in this repo:
+
+1. TD source table (`allAlphaNumeric`) was extracted.
+2. Project cache TSV was created at `data/harness/op-snippets/catalog.tsv`.
+3. Same dataset was embedded into `TdHttpApi` as `table_td_examples` for tox-only portability.
+
+If you ever need to recreate from TD source again (not from the embedded DAT), use the workflow in [.ai/skills/td-network-craft.md](.ai/skills/td-network-craft.md) under “How the corpus was located” and “How to actually materialize a specific example (verified mechanism)”.
 
 ### Write / Mutate
 

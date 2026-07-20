@@ -26,7 +26,31 @@ The `allAlphaNumeric` table was extracted (via `/run`, writing directly to the r
 
 This file is the **Tier 1 retrieval index** — offline, greppable, and it maps *technique/goal → operator → snippet relpath → description* without loading a single network. E.g. `grep -i feedbackTOP data/harness/op-snippets/catalog.tsv` surfaces every feedback example and what each shows.
 
-To regenerate (e.g. after a TD update): load `OPSnippetsOnDemand.tox` into a temp COMP, read `snippetsChooser/allAlphaNumeric`, write the columns out, destroy the temp COMP. It's derived reference data, not authoritative — refresh freely.
+To regenerate (e.g. after a TD update), prefer the self-contained bridge refresh route:
+
+```bash
+curl -X POST -d "" "http://127.0.0.1:9980/examples-refresh"
+```
+
+or with an explicit output path:
+
+```bash
+curl -X POST -d "" "http://127.0.0.1:9980/examples-refresh?output=D:/workspace/haxlib/data/harness/op-snippets/catalog.tsv"
+```
+
+You can still stream raw TSV if needed:
+
+```bash
+curl -s "http://127.0.0.1:9980/examples.tsv" > data/harness/op-snippets/catalog.tsv
+```
+
+or on PowerShell:
+
+```powershell
+curl.exe -s -o data/harness/op-snippets/catalog.tsv "http://127.0.0.1:9980/examples.tsv"
+```
+
+Both forms are derived reference data exports, not authoritative — refresh freely.
 
 ## The two-tier learning model
 

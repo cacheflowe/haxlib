@@ -6,6 +6,7 @@ import sys
 import time
 import traceback
 import inspect
+import csv
 
 # ---------------------------------------------------------------------------
 # Network description (self-contained - no td_util dependency, so this file
@@ -675,6 +676,80 @@ def _route_server_info(request, response, pars, webServerDAT, **_):
 	_ok_json(response, info)
 
 
+def _route_smoketest(request, response, pars, webServerDAT, **_):
+	"""Run a lightweight functionality smoketest for this running server instance.
+
+	Default mode is read-only and non-destructive. Optional `writeTest=true` performs a
+	create/destroy probe and therefore requires POST/PUT.
+	"""
+	write_test = _bool_param(pars, 'writeTest', False)
+	if write_test:
+		_require_write_method(request, '/smoketest?writeTest=true')
+	checks = []
+
+	def record(name, ok, detail):
+		checks.append({'name': name, 'ok': bool(ok), 'detail': detail})
+
+	# Route registration sanity for critical endpoints.
+	required_routes = (
+		'/network', '/errors', '/docs', '/routes', '/schema',
+		'/examples', '/examples.tsv', '/examples-refresh', '/flag', '/par',
+	)
+	missing = [r for r in required_routes if r not in _ROUTES]
+	record('routes_registered', len(missing) == 0, {'missing': missing})
+
+	# Embedded docs presence (drop-in tox should include these).
+	parent = webServerDAT.parent()
+	doc_nodes = [n.name for n in _nodes_in_comp(parent) if n.isDAT and n.name.startswith('docs_')]
+	record('embedded_docs_present', len(doc_nodes) >= 1, {'docs': sorted(doc_nodes)})
+
+	# Examples DAT parseability.
+	try:
+		dat, dat_name = _resolve_examples_dat(webServerDAT, pars)
+		header, records = _dat_table_records(dat)
+		record('examples_dat_parse', len(header) >= 1 and len(records) >= 1, {
+			'name': dat_name,
+			'columns': len(header),
+			'rows': len(records),
+		})
+	except Exception as e:
+		record('examples_dat_parse', False, {'error': str(e)})
+
+	# Schema coverage sanity for critical documented routes.
+	missing_schema = [r for r in ('/examples', '/examples.tsv', '/examples-refresh') if r not in _SCHEMA_OVERRIDES]
+	record('schema_overrides_present', len(missing_schema) == 0, {'missing': missing_schema})
+
+	# Basic runtime state sanity.
+	record('runtime_state', project.realTime and project.cookRate > 0, {
+		'realTime': project.realTime,
+		'cookRate': project.cookRate,
+	})
+
+	# Optional write probe (create then destroy a temp node in the current network).
+	if write_test:
+		probe_name = '_smoketest_probe_null'
+		probe_path = None
+		try:
+			comp = _get_current_network()
+			probe = comp.op(probe_name)
+			if probe is not None:
+				probe.destroy()
+			created = comp.create('nullCOMP', probe_name)
+			probe_path = created.path
+			created.destroy()
+			record('write_probe_create_destroy', True, {'path': probe_path})
+		except Exception as e:
+			record('write_probe_create_destroy', False, {'path': probe_path, 'error': str(e)})
+
+	passed = all(c['ok'] for c in checks)
+	_ok_json(response, {
+		'passed': passed,
+		'checkCount': len(checks),
+		'writeTest': write_test,
+		'checks': checks,
+	})
+
+
 _DOCS_PREAMBLE = """# TD HTTP API - Agent Onboarding
 
 You are connected to a live TouchDesigner project over its HTTP bridge (this server, port {port}).
@@ -689,6 +764,8 @@ Fetch a single doc instead of all of them with `GET /docs?name=<docname>` (works
 
 For a live, code-accurate reference of every route this server currently supports (method + one-line
 summary, generated straight from the running handlers rather than this prose), see `GET /routes`.
+For a machine-readable contract of route methods/params/examples that agents can validate against,
+see `GET /schema`.
 """
 
 
@@ -736,6 +813,120 @@ def _route_docs(request, response, pars, webServerDAT, **_):
 	_ok_text(response, '\n\n---\n\n'.join(sections))
 
 
+def _dat_table_records(dat):
+	"""Parse a DAT into a header+records structure.
+
+	For table DATs we use csv content (stable for embedded tox data); for text DATs we
+	also treat content as CSV so an exported/imported database still works.
+	"""
+	content = dat.csv if dat.isTable else dat.text
+	reader = csv.reader(io.StringIO(content))
+	rows = list(reader)
+	if not rows:
+		return [], []
+	header = [h.strip().lstrip('\ufeff').replace('"', '') for h in rows[0]]
+	records = []
+	for row in rows[1:]:
+		normalized = list(row) + [''] * max(0, len(header) - len(row))
+		records.append({header[i]: normalized[i] for i in range(len(header))})
+	return header, records
+
+
+def _resolve_examples_dat(webServerDAT, pars):
+	"""Resolve the examples DAT target and return (dat, dat_name).
+
+	Default source is the embedded `table_td_examples` DAT in TdHttpApi.
+	"""
+	parent = webServerDAT.parent()
+	dat_name = _first_param(pars, 'name', 'table_td_examples')
+	dat = parent.op(dat_name)
+	if dat is None or not dat.isDAT:
+		raise ValueError(f"no DAT named '{dat_name}' found under '{parent.path}'")
+	return dat, dat_name
+
+
+def _filter_examples_records(records, pars):
+	"""Apply optional text filter (`q`) over all record values."""
+	query = (_first_param(pars, 'q') or '').strip().lower()
+	if not query:
+		return records
+	return [rec for rec in records if query in ' '.join(str(v) for v in rec.values()).lower()]
+
+
+def _route_examples(request, response, pars, webServerDAT, **_):
+	"""Query the embedded examples database DAT (default: table_td_examples) inside the
+	TdHttpApi COMP so tox-only deployments have a portable, in-component source of example
+	patterns without relying on external files."""
+	dat, _ = _resolve_examples_dat(webServerDAT, pars)
+	header, records = _dat_table_records(dat)
+	records = _filter_examples_records(records, pars)
+	offset = int(_first_param(pars, 'offset', '0'))
+	limit = int(_first_param(pars, 'limit', '50'))
+	if offset < 0:
+		offset = 0
+	if limit < 1:
+		limit = 1
+	if limit > 500:
+		limit = 500
+	paged = records[offset:offset + limit]
+	_ok_json(response, {
+		'source': dat.path,
+		'columns': header,
+		'total': len(records),
+		'offset': offset,
+		'limit': limit,
+		'returned': len(paged),
+		'rows': paged,
+	})
+
+
+def _examples_tsv_text(records, header):
+	buf = io.StringIO()
+	writer = csv.writer(buf, delimiter='\t', lineterminator='\n')
+	writer.writerow(header)
+	for rec in records:
+		writer.writerow([rec.get(col, '') for col in header])
+	return buf.getvalue()
+
+
+def _route_examples_tsv(request, response, pars, webServerDAT, **_):
+	"""Export the embedded examples database as TSV directly from the running bridge.
+
+	This keeps refresh workflows self-contained in td_http_api (no external script required):
+	call GET /examples.tsv and write response bytes to data/harness/op-snippets/catalog.tsv.
+	"""
+	dat, _ = _resolve_examples_dat(webServerDAT, pars)
+	header, records = _dat_table_records(dat)
+	records = _filter_examples_records(records, pars)
+	response['statusCode'] = 200
+	response['statusReason'] = 'OK'
+	response['content-type'] = 'text/tab-separated-values; charset=utf-8'
+	response['data'] = _examples_tsv_text(records, header)
+
+
+def _route_examples_refresh(request, response, pars, webServerDAT, **_):
+	"""Refresh an on-disk examples catalog TSV from the embedded examples DAT.
+
+	This is the self-contained replacement for external refresh scripts.
+	"""
+	_require_write_method(request, '/examples-refresh')
+	dat, _ = _resolve_examples_dat(webServerDAT, pars)
+	header, records = _dat_table_records(dat)
+	records = _filter_examples_records(records, pars)
+	default_output = f"{project.folder}/data/harness/op-snippets/catalog.tsv"
+	output = _first_param(pars, 'output', default_output)
+	output = output.replace('\\', '/')
+	os.makedirs(os.path.dirname(output), exist_ok=True)
+	with open(output, 'w', encoding='utf-8', newline='') as f:
+		f.write(_examples_tsv_text(records, header))
+	_ok_json(response, {
+		'output': output,
+		'rows': len(records),
+		'columns': len(header),
+		'source': dat.path,
+	})
+
+
 def _infer_methods(uri, fn, _seen=None):
 	"""Best-effort HTTP method(s) for a route, derived from the handler's compiled bytecode rather
 	than a hand-maintained table that can drift (or inspect.getsource(), which isn't reliable here --
@@ -750,6 +941,8 @@ def _infer_methods(uri, fn, _seen=None):
 	known handler referenced by name, with a visited-set guard against cycles."""
 	if uri == '/delete':
 		return ['POST', 'DELETE']
+	if uri == '/smoketest':
+		return ['GET', 'POST', 'PUT']
 	if '_require_write_method' in fn.__code__.co_names:
 		return ['POST', 'PUT']
 	flat_consts = set()
@@ -783,6 +976,225 @@ def _route_routes(request, response, pars, **_):
 		summary = doc.splitlines()[0] if doc else ''
 		entries.append({'uri': uri, 'methods': _infer_methods(uri, fn), 'summary': summary})
 	_ok_json(response, entries)
+
+
+# Every one of these is a plain Python attribute on OP ("Common Flags" in TD's own docs) -
+# never a Par, so /par can never reach them. Keep this above schema overrides so enum generation
+# works at module import time.
+_KNOWN_OP_FLAGS = frozenset((
+	'activeViewer', 'allowCooking', 'bypass', 'cloneImmune', 'current', 'display',
+	'expose', 'lock', 'python', 'render', 'selected', 'showCustomOnly', 'showDocked',
+	'viewer',
+))
+
+
+_SCHEMA_OVERRIDES = {
+	'/flag': {
+		'query': {
+			'name': {
+				'type': 'string',
+				'required': True,
+				'enum': sorted(_KNOWN_OP_FLAGS),
+			},
+			'value': {
+				'type': 'boolean',
+				'required': False,
+				'default': True,
+			},
+			'path': {'type': 'string', 'required': False},
+			'paths': {'type': 'csv<string>', 'required': False},
+			'family': {'type': 'string', 'required': False},
+			'recursive': {'type': 'boolean', 'required': False, 'default': False},
+		},
+		'response': {'type': 'array<object>', 'shape': {'path': 'string', '<flagName>': 'boolean'}},
+		'examples': [
+			{
+				'method': 'POST',
+				'query': 'path=/project1/TESTING&family=TOP&name=bypass&value=true',
+				'description': 'Bypass all TOPs in a network root.',
+			},
+		],
+	},
+	'/par': {
+		'query': {
+			'path': {'type': 'string', 'required': True},
+			'par': {'type': 'string', 'required': True},
+			'value': {'type': 'string', 'required': False},
+			'expr': {'type': 'string', 'required': False},
+		},
+		'rules': [
+			"GET reads parameter state.",
+			"POST/PUT require either 'value' or 'expr'.",
+		],
+		'response': {'type': 'object', 'shape': {'name': 'string', 'mode': 'string', 'value': 'any'}},
+		'examples': [
+			{
+				'method': 'POST',
+				'query': 'path=/project1/geo1&par=tx&value=1.5',
+				'description': 'Set a numeric parameter value.',
+			},
+		],
+	},
+	'/wire': {
+		'query': {
+			'path': {'type': 'string', 'required': True},
+			'inputs': {'type': 'csv<string>', 'required': False, 'default': ''},
+		},
+		'response': {'type': 'object', 'shape': {'path': 'string', 'inputs': 'array<string|null>'}},
+		'examples': [
+			{
+				'method': 'POST',
+				'query': 'path=/project1/level1&inputs=/project1/noise1',
+				'description': 'Connect one input to a TOP.',
+			},
+		],
+	},
+	'/insert': {
+		'query': {
+			'target': {'type': 'string', 'required': True},
+			'opType': {'type': 'string', 'required': True},
+			'name': {'type': 'string', 'required': False},
+			'inputIndex': {'type': 'integer', 'required': False, 'default': 0},
+			'viewer': {'type': 'boolean', 'required': False, 'default': True},
+		},
+		'response': {'type': 'object', 'shape': {'inserted': 'object', 'target': 'object'}},
+		'examples': [
+			{
+				'method': 'POST',
+				'query': 'target=/project1/null1&opType=noiseCHOP&name=noise_offset1',
+				'description': 'Insert an operator upstream of target input 0.',
+			},
+		],
+	},
+	'/examples': {
+		'query': {
+			'name': {'type': 'string', 'required': False, 'default': 'table_td_examples'},
+			'q': {'type': 'string', 'required': False},
+			'offset': {'type': 'integer', 'required': False, 'default': 0},
+			'limit': {'type': 'integer', 'required': False, 'default': 50, 'min': 1, 'max': 500},
+		},
+		'response': {
+			'type': 'object',
+			'shape': {
+				'source': 'string',
+				'columns': 'array<string>',
+				'total': 'integer',
+				'offset': 'integer',
+				'limit': 'integer',
+				'returned': 'integer',
+				'rows': 'array<object>',
+			},
+		},
+		'examples': [
+			{
+				'method': 'GET',
+				'query': 'q=feedback&limit=10',
+				'description': 'Search embedded examples for feedback-related rows.',
+			},
+		],
+	},
+	'/examples.tsv': {
+		'query': {
+			'name': {'type': 'string', 'required': False, 'default': 'table_td_examples'},
+			'q': {'type': 'string', 'required': False},
+		},
+		'response': {
+			'type': 'text/tab-separated-values',
+			'shape': 'header row + tab-delimited data rows',
+		},
+		'examples': [
+			{
+				'method': 'GET',
+				'query': 'q=feedback',
+				'description': 'Export only matching rows as TSV.',
+			},
+		],
+	},
+	'/examples-refresh': {
+		'query': {
+			'name': {'type': 'string', 'required': False, 'default': 'table_td_examples'},
+			'q': {'type': 'string', 'required': False},
+			'output': {'type': 'string', 'required': False, 'default': '<project.folder>/data/harness/op-snippets/catalog.tsv'},
+		},
+		'response': {
+			'type': 'object',
+			'shape': {'output': 'string', 'rows': 'integer', 'columns': 'integer', 'source': 'string'},
+		},
+		'examples': [
+			{
+				'method': 'POST',
+				'query': 'output=D:/workspace/haxlib/data/harness/op-snippets/catalog.tsv',
+				'description': 'Write the embedded examples catalog to disk.',
+			},
+		],
+	},
+	'/smoketest': {
+		'query': {
+			'writeTest': {'type': 'boolean', 'required': False, 'default': False},
+			'name': {'type': 'string', 'required': False, 'default': 'table_td_examples'},
+		},
+		'rules': [
+			"Default mode is read-only.",
+			"If writeTest=true, request must use POST/PUT and performs a create/destroy probe.",
+		],
+		'response': {
+			'type': 'object',
+			'shape': {'passed': 'boolean', 'checkCount': 'integer', 'writeTest': 'boolean', 'checks': 'array<object>'},
+		},
+		'examples': [
+			{'method': 'GET', 'query': '', 'description': 'Read-only pre-commit smoketest.'},
+			{'method': 'POST', 'query': 'writeTest=true', 'description': 'Include write create/destroy probe.'},
+		],
+	},
+}
+
+
+def _route_schema(request, response, pars, webServerDAT, **_):
+	"""Machine-readable API contract for this running server instance: route methods, one-line
+	summaries, and (for selected high-risk write routes) explicit query param specs + examples.
+	Designed for agent self-configuration and preflight validation so calls are correct on first try."""
+	route_filter = _first_param(pars, 'route')
+	include_examples = _bool_param(pars, 'examples', True)
+	routes = {}
+	for uri, fn in sorted(_ROUTES.items()):
+		if route_filter and uri != route_filter:
+			continue
+		doc = inspect.getdoc(fn)
+		summary = doc.splitlines()[0] if doc else ''
+		entry = {
+			'methods': _infer_methods(uri, fn),
+			'summary': summary,
+			'request': {
+				'query': {},
+				'body': {'type': 'string', 'required': False},
+			},
+			'response': {'type': 'varies-by-route'},
+		}
+		override = _SCHEMA_OVERRIDES.get(uri)
+		if override:
+			entry['request']['query'] = dict(override.get('query', {}))
+			entry['response'] = dict(override.get('response', entry['response']))
+			if 'rules' in override:
+				entry['rules'] = list(override['rules'])
+			if include_examples and 'examples' in override:
+				entry['examples'] = list(override['examples'])
+		routes[uri] = entry
+	if route_filter and not routes:
+		raise ValueError(f"unknown route '{route_filter}'. try {_KNOWN_ROUTES}")
+	_ok_json(response, {
+		'version': '1.0.0',
+		'generatedAt': time.time(),
+		'server': {
+			'webserver': webServerDAT.path,
+			'port': webServerDAT.par.port.eval(),
+		},
+		'capabilities': {
+			'discovery': ['/', '/docs', '/routes', '/schema'],
+			'routeFilterQuery': 'route=/wire',
+			'includeExamplesQuery': 'examples=true|false',
+		},
+		'routes': routes,
+	})
 
 
 def _route_cookstats(request, response, pars, **_):
@@ -986,16 +1398,6 @@ def _route_comment(request, response, pars, **_):
 		n.comment = text
 	_ok_json(response, [{'path': n.path, 'comment': n.comment} for n in targets])
 
-
-# Every one of these is a plain Python attribute on OP ("Common Flags" in TD's own docs) -
-# never a Par, so /par can never reach them. Only /run (or this generic /flag route) can.
-_KNOWN_OP_FLAGS = frozenset((
-	'activeViewer', 'allowCooking', 'bypass', 'cloneImmune', 'current', 'display',
-	'expose', 'lock', 'python', 'render', 'selected', 'showCustomOnly', 'showDocked',
-	'viewer',
-))
-
-
 def _route_flag(request, response, pars, **_):
 	_require_write_method(request, '/flag')
 	name = _first_param(pars, 'name')
@@ -1181,7 +1583,12 @@ _ROUTES = {
 	'/health':               _route_health,
 	'/server-info':          _route_server_info,
 	'/docs':                 _route_docs,
+	'/examples':             _route_examples,
+	'/examples.tsv':         _route_examples_tsv,
+	'/examples-refresh':     _route_examples_refresh,
+	'/smoketest':            _route_smoketest,
 	'/routes':               _route_routes,
+	'/schema':               _route_schema,
 	'/cookstats':            _route_cookstats,
 	'/snapshot':             _route_snapshot,
 	'/chop':                 _route_chop,
@@ -1257,8 +1664,9 @@ def onHTTPRequest(webServerDAT, request, response):
 		'callbackElapsedMs': round(callback_elapsed_ms, 2),
 	}
 	_log_request(log_entry)
-	print(f"[td_http_api] {log_entry['method']} {uri} -> {log_entry['statusCode']} "
-		f"(callback took {log_entry['callbackElapsedMs']}ms, requestKeys={log_entry['requestKeys']}, dataLen={log_entry['dataLen']})")
+	if parent().par.Printlogs == 1:
+		print(f"[td_http_api] {log_entry['method']} {uri} -> {log_entry['statusCode']} "
+			f"(callback took {log_entry['callbackElapsedMs']}ms, requestKeys={log_entry['requestKeys']}, dataLen={log_entry['dataLen']})")
 
 	return response
 
