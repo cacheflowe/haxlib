@@ -22,10 +22,10 @@ After registering it, make one lightweight documentation query to verify that th
 
 ## 3. Confirm the connection
 
-The td-http-api server is live at `http://127.0.0.1:9980`. Confirm it now:
+The td-http-api server is live at `http://127.0.0.1:3031`. Confirm it now:
 
 ```
-curl -s "http://127.0.0.1:9980/network"
+curl -s "http://127.0.0.1:3031/network"
 ```
 
 It returns JSON describing the network currently open in the TD UI.

@@ -29,25 +29,25 @@ This file is the **Tier 1 retrieval index** — offline, greppable, and it maps 
 To regenerate (e.g. after a TD update), prefer the self-contained bridge refresh route:
 
 ```bash
-curl -X POST -d "" "http://127.0.0.1:9980/examples-refresh"
+curl -X POST -d "" "http://127.0.0.1:3031/examples-refresh"
 ```
 
 or with an explicit output path:
 
 ```bash
-curl -X POST -d "" "http://127.0.0.1:9980/examples-refresh?output=D:/workspace/haxlib/data/harness/op-snippets/catalog.tsv"
+curl -X POST -d "" "http://127.0.0.1:3031/examples-refresh?output=D:/workspace/haxlib/data/harness/op-snippets/catalog.tsv"
 ```
 
 You can still stream raw TSV if needed:
 
 ```bash
-curl -s "http://127.0.0.1:9980/examples.tsv" > data/harness/op-snippets/catalog.tsv
+curl -s "http://127.0.0.1:3031/examples.tsv" > data/harness/op-snippets/catalog.tsv
 ```
 
 or on PowerShell:
 
 ```powershell
-curl.exe -s -o data/harness/op-snippets/catalog.tsv "http://127.0.0.1:9980/examples.tsv"
+curl.exe -s -o data/harness/op-snippets/catalog.tsv "http://127.0.0.1:3031/examples.tsv"
 ```
 
 Both forms are derived reference data exports, not authoritative — refresh freely.

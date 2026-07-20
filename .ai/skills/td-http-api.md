@@ -21,12 +21,12 @@ Companion utility: `python/util/td_util.py` holds general-purpose op helpers (no
 
 ## Setup
 
-**Fastest path — drop in the packaged component:** `tox/haxlib/net/TdHttpApi.tox` is a self-contained, drop-in COMP wrapping the Web Server DAT + an embedded copy of the callback code, plus a `readMe` and file-synced copies of the skill docs. Drag it into any project (or `op('/project1').loadTox(...)`), and it starts serving on port 9980 automatically — no wiring needed. It has a `readMe` DAT inside with getting-started notes. (Two routes degrade in a non-haxlib project: `/reload` needs `op.App`, and the `docs_*` DATs point at `.ai/skills/*.md` — everything else is self-contained.)
+**Fastest path — drop in the packaged component:** `tox/haxlib/net/TdHttpApi.tox` is a self-contained, drop-in COMP wrapping the Web Server DAT + an embedded copy of the callback code, plus a `readMe` and file-synced copies of the skill docs. Drag it into any project (or `op('/project1').loadTox(...)`), and it starts serving on port 3031 automatically — no wiring needed. It has a `readMe` DAT inside with getting-started notes. (Two routes degrade in a non-haxlib project: `/reload` needs `op.App`, and the `docs_*` DATs point at `.ai/skills/*.md` — everything else is self-contained.)
 
 **Manual setup** (or to keep the live-edit/hot-reload workflow in this project):
 1. **Text DAT for the callback code** — create a Text DAT (e.g. `Td_http_api`), sync its file to `python/util/td_http_api.py`.
-2. **Web Server DAT** — add one, set its **Callbacks DAT** parameter to the `Td_http_api` Text DAT, pick a **Port** (dev convention in this project: `9980`), turn **Active** on.
-3. **Verify**: `curl http://127.0.0.1:9980/network` should return JSON.
+2. **Web Server DAT** — add one, set its **Callbacks DAT** parameter to the `Td_http_api` Text DAT, pick a **Port** (dev convention in this project: `3031`), turn **Active** on.
+3. **Verify**: `curl http://127.0.0.1:3031/network` should return JSON.
     Note: Use `127.0.0.1` instead of `localhost` to avoid potential DNS/IPv6 resolution delays.
 
 Note the packaged `.tox` embeds a *snapshot* of the callback code; the canonical source stays `python/util/td_http_api.py`. After meaningful changes to the routes, re-export the `.tox` (build a wrapper COMP, embed the current file text into its `callbacks` DAT, save) so the drop-in doesn't drift.
@@ -61,7 +61,7 @@ Hard-won workflow lessons for an agent *using* this API (as opposed to the serve
 - **Annotation nodes (`annotateCOMP`) are utility nodes — `op(path)` returns `None` for them.** They don't appear in `parent.children` and can't be resolved with a bare `op('/some/path/comment7')` call. In `/run` scripts, access them via `parent.findChildren(name='comment7', depth=1, includeUtility=True)[0]`. The `/par` and `/network` routes handle this transparently via `_resolve_op`'s utility-node fallback, but raw Python inside `/run` does not.
 - **Don't pass multiline or special-character values as PowerShell variables into `curl.exe` query params.** PowerShell truncates or mangles long `%`-encoded strings during variable interpolation. Instead, put the mutation in a `/run` script file and POST with `--data-binary @file`. This is the correct pattern for any body text that contains newlines, quotes, or non-ASCII.
 - **A `\uFFFD`/mojibake in curl output is usually a display artifact, not data corruption.** Non-ASCII (em-dashes, `Δ`, etc.) round-trips fine through TD and `.tox` storage but can render garbled through the curl→python→Windows-console pipe. Before "fixing" a suspected encoding bug, confirm in-process (e.g. `sum(1 for ch in dat.text if ord(ch) > 127)`) — the stored data is usually clean. (That said, ASCII-only is still the safe choice for user-facing text like a `readMe`.)
-- **Never reconfigure or reparent the Web Server DAT you're currently talking through.** Modifying the live server risks cutting your own connection mid-operation. To build/modify server infrastructure, create a *fresh* component, test it on an alternate port (e.g. 9981/9982), verify, then save/swap — leaving the live server untouched until the new one is proven.
+- **Never reconfigure or reparent the Web Server DAT you're currently talking through.** Modifying the live server risks cutting your own connection mid-operation. To build/modify server infrastructure, create a *fresh* component, test it on an alternate port (e.g. 3032/3033), verify, then save/swap — leaving the live server untouched until the new one is proven.
 - **Probe hygiene.** Temp COMPs created for inspection/testing should use a distinctive `_`-prefix (`_snippet_probe`, `_verify`, …), be destroyed at the end of the same script that made them, and their destruction verified (`op(path) is None`). Re-run recon after multi-step builds to confirm nothing leaked.
 
 ### Resolving the user's current network
@@ -125,9 +125,9 @@ To rebuild `tox/haxlib/net/TdHttpApi.tox` after meaningful route changes (via `/
 
 1. Create a wrapper `baseCOMP` (temp location, e.g. `/project1/TdHttpApi`).
 2. Create a `callbacks` `textDAT`; embed the current source: `callbacks.text = open(project.folder + '/python/util/td_http_api.py').read()`; set `language='python'`.
-3. Create a `webserver` `webserverDAT`; **delete the auto-spawned `webserver_callbacks` stub** it creates; set `par.callbacks = callbacks`, `par.port = 9980`, `par.active = True`.
+3. Create a `webserver` `webserverDAT`; **delete the auto-spawned `webserver_callbacks` stub** it creates; set `par.callbacks = callbacks`, `par.port = 3031`, `par.active = True`.
 4. Add the `readMe` (ASCII) and the `docs_*` DATs (`par.file` → the `.ai/skills/*.md` paths, `syncfile` on).
-5. Test on an alternate port first (`par.port = 9981`) → `curl` a couple routes → then reset to 9980.
+5. Test on an alternate port first (`par.port = 3032`) → `curl` a couple routes → then reset to 3031.
 6. `comp.save(project.folder + '/tox/haxlib/net/TdHttpApi.tox')`.
 7. **Round-trip verify**: `loadTox` the saved file into a throwaway COMP on a spare port, curl it, then destroy the probe.
 8. Destroy the build instance so the project keeps only its original live server.
@@ -331,12 +331,12 @@ If you ever need to recreate from TD source again (not from the embedded DAT), u
 ### Example calls
 
 ```bash
-curl "http://127.0.0.1:9980/network?recursive=false"
-curl "http://127.0.0.1:9980/dat?path=/project1/AppStore/execute1"
-curl "http://127.0.0.1:9980/par?path=/project1/Test_Claude_Connections/comp_insta_template&par=prefit"
-curl -X POST -d "" "http://127.0.0.1:9980/par?path=/project1/Test_Claude_Connections/comp_insta_template&par=prefit&value=fitoutside"
-curl -X POST -d "" "http://127.0.0.1:9980/create?parent=/project1/Test_Claude_Connections&opType=nullTOP&name=null1&x=200&y=0&inputs=/project1/Test_Claude_Connections/comp_insta_template"
-curl "http://127.0.0.1:9980/reload"
+curl "http://127.0.0.1:3031/network?recursive=false"
+curl "http://127.0.0.1:3031/dat?path=/project1/AppStore/execute1"
+curl "http://127.0.0.1:3031/par?path=/project1/Test_Claude_Connections/comp_insta_template&par=prefit"
+curl -X POST -d "" "http://127.0.0.1:3031/par?path=/project1/Test_Claude_Connections/comp_insta_template&par=prefit&value=fitoutside"
+curl -X POST -d "" "http://127.0.0.1:3031/create?parent=/project1/Test_Claude_Connections&opType=nullTOP&name=null1&x=200&y=0&inputs=/project1/Test_Claude_Connections/comp_insta_template"
+curl "http://127.0.0.1:3031/reload"
 ```
 
 **Always pass a body on POST/PUT, even an empty one (`-d ""`).** Without it, curl sends no `Content-Length` header, and POCO's web server appears to wait for a request body before dispatching to `onHTTPRequest` — the wait times out around ~60 seconds before it processes the request anyway. Every route here reads its arguments from the query string, not the body (except `/dat`'s POST, which uses the body as the new content) — `-d ""` is just there to make the request well-formed, not because any data needs to go in it. This was the actual cause of a very confusing debugging session that initially looked like a TD cook-performance problem (a Feedback TOP loop happened to be running expensively at the same time, which was real but was a coincidental red herring — see below).
