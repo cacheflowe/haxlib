@@ -252,6 +252,24 @@ Always assess **Active Performance Overhead (ms/sec)** by profiling over a frame
 
 ---
 
+## 15. Getting Delta Time / Frame Rate
+
+**Wrong:**
+```python
+dt = scriptOp.time.deltaTime   # AttributeError: 'timeCOMP' has no attribute 'deltaTime'
+dt = 1.0 / scriptOp.time.rate  # works but fragile — timeCOMP.rate reflects local timeline
+```
+
+**Correct:**
+```python
+dt = absTime.stepSeconds  # seconds elapsed between previous and current frame
+```
+
+`absTime` members: `.frame`, `.seconds`, `.step` (frames elapsed), `.stepSeconds` (seconds elapsed).
+There is no `.rate` or `.deltaTime` — use `absTime.stepSeconds` for frame-rate-independent physics.
+
+---
+
 ## See Also
 
 - [.ai/skills/td-skills.md](.ai/skills/td-skills.md) — Philosophy, retrieval strategy, class hierarchy
