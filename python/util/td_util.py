@@ -52,6 +52,8 @@ def get_downstream_ops(node: td.OP) -> list[td.OP]:
 
 def get_all_downstream_ops(node: td.OP, _visited: set = None) -> list[td.OP]:
 	"""Return all ops reachable downstream from node (recursive, no duplicates)."""
+	if node is None:
+		return []
 	if _visited is None:
 		_visited = set()
 	_visited.add(node.id)
