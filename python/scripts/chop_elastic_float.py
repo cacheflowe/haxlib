@@ -187,10 +187,13 @@ def onCook(scriptOp: scriptCHOP):
 	# Collect all channels from all inputs: list of (input_idx, ch_idx, ch_name)
 	channels = []
 	if scriptOp.inputs:
-		for inp_idx, inp in enumerate(scriptOp.inputs):
-			for ch_idx in range(inp.numChans):
-				ch_name = inp[ch_idx].name
-				channels.append((inp_idx, ch_idx, ch_name))
+		try:
+			for inp_idx, inp in enumerate(scriptOp.inputs):
+				for ch_idx in range(inp.numChans):
+					ch_name = inp[ch_idx].name
+					channels.append((inp_idx, ch_idx, ch_name))
+		except (TypeError, AttributeError):
+			channels = [(0, 0, 'val')]
 	else:
 		channels = [(0, 0, 'val')]
 
@@ -203,8 +206,11 @@ def onCook(scriptOp: scriptCHOP):
 	for i, (inp_idx, ch_idx, ch_name) in enumerate(channels):
 		e = _elastics[i]
 		e.set_friction(fric).set_accel(accel)
-		if scriptOp.inputs and inp_idx < len(scriptOp.inputs):
-			e.set_target(scriptOp.inputs[inp_idx][ch_idx][0])
+		if scriptOp.inputs:
+			try:
+				e.set_target(scriptOp.inputs[inp_idx][ch_idx][0])
+			except (TypeError, IndexError, AttributeError):
+				pass
 		vals.append(e.update(dt=dt, snap=snap))
 
 	# Output: all vals, then all speeds (grouped by channel across all inputs)
