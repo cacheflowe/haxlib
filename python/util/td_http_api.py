@@ -659,6 +659,54 @@ def _route_health(request, response, pars, webServerDAT, **_):
 	})
 
 
+def _route_root(request, response, pars, webServerDAT, **_):
+	"""Root endpoint - greet a brand-new agent and guide it through the onboarding sequence."""
+	port = webServerDAT.par.port.eval()
+	onboarding = f"""# TD HTTP API - Welcome
+
+You are connected to a live TouchDesigner project over its HTTP bridge (this server, port {port}).
+
+## Getting Started (Recommended Order)
+
+1. **Read the Operating Guide:**
+   ```
+   GET http://127.0.0.1:{port}/docs
+   ```
+   Covers the full HTTP route reference, client-side workflow lessons, and how to work idiomatically with this bridge.
+
+2. **Inspect the Current Network:**
+   ```
+   GET http://127.0.0.1:{port}/network
+   ```
+   Understand what nodes, wires, and references exist in the actively displayed network.
+
+3. **Discover Available Routes:**
+   ```
+   GET http://127.0.0.1:{port}/routes
+   ```
+   See every operation this server supports with one-line summaries.
+
+4. **Validate Your Request Schema:**
+   ```
+   GET http://127.0.0.1:{port}/schema
+   ```
+   Machine-readable contracts for every route (methods, params, examples).
+
+## Quick Links
+
+- **Full Examples:** `GET /examples` (formatted) or `GET /examples.tsv` (table)
+- **Health Status:** `GET /health`
+- **Request Logs:** `GET /logs`
+- **Network Mermaid Diagram:** `GET /network.mmd`
+- **Run Arbitrary Python:** `POST /run` (advanced; read `/docs` first)
+
+---
+
+**Pro Tip:** Start with `/docs`. It has everything you need to work effectively. Don't skip it.
+"""
+	_ok_text(response, onboarding)
+
+
 def _route_server_info(request, response, pars, webServerDAT, **_):
 	"""Identify the running bridge itself: the Web Server DAT, its Callbacks DAT, and whether
 	that DAT is file-synced (edit-the-file-directly) or an embedded snapshot (needs /dat pushes
@@ -1625,9 +1673,9 @@ def onHTTPRequest(webServerDAT, request, response):
 
 	try:
 		# A bare '/' (no prior knowledge of any route) is the most likely first request a brand-new
-		# agent makes -- point it at the two self-discovery endpoints instead of a plain 404.
+		# agent makes -- greet it with an onboarding guide.
 		if uri in ('/', ''):
-			handler = _route_docs
+			handler = _route_root
 		else:
 			handler = _ROUTES.get(uri)
 		if handler is None:
