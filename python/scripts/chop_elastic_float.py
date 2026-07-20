@@ -222,5 +222,5 @@ def onCook(scriptOp: scriptCHOP):
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
-	return CookLevel.ALWAYS if scriptOp.time.play else CookLevel.AUTOMATIC
+	return CookLevel.AUTOMATIC
 
