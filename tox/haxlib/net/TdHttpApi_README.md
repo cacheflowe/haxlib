@@ -2,7 +2,7 @@
 
 Welcome to `TdHttpApi`, the HTTP bridge that gives **AI agents autonomous read/write access** to your running TouchDesigner project. Agents can inspect, build, and debug networks directly via a REST API and open-ended Python scripting, mirroring everything that's possible with traditional manual editing in the TouchDesigner UI. This allows your coding agent (Claude/Copilot/etc) to **see the network, understand it, and modify it**, which gives you the power of agentic coding tools that are commonly used in traditional software development, but now applied to the TouchDesigner IDE.
 
-> ⚠️ Any request has the potential to mutate the network state immediately, with no undo. Use caution when running destructive operations, and back up your project often.
+> ⚠️ Any agentic interaction has the potential to mutate the network state immediately, with no undo. Use caution when running destructive operations, and back up your project often.
 
 This tool is a work-in-progress, and the API is still evolving. If you have questions or suggestions, please reach out or open an issue on GitHub. The goal is to make this a robust and reliable tool for agentic TouchDesigner development.
 
@@ -45,9 +45,9 @@ This tool is a work-in-progress, and the API is still evolving. If you have ques
 
 ---
 
-## Getting Started (60 seconds)
+## Getting Started
 
-### Step 1
+### Step 1: Install the TdHttpApi Component
 
 Drop the `TdHttpApi.tox` component into your TouchDesigner project. It runs a local HTTP server on port 3031, exposing the entire network and Python API.
 
