@@ -5,20 +5,24 @@ description: Orient an agent at the start of a live TouchDesigner session — lo
 
 # TD Session Start
 
-We're collaborating on a **live TouchDesigner project** over the td-http-api HTTP bridge. Get oriented before doing anything else.
+We're collaborating on a **live TouchDesigner project** over the td-http-api HTTP bridge. Get oriented with skills/docs and load `td-docs-mcp` before doing anything else.
 
-## 1. Load the skills
+## 1. Load the skills (if available)
 
-Read and follow these two skills:
+If your project has agent skills available, read and follow these:
 
-- **`td-http-api`** — the HTTP bridge into the running TD project. This is your primary tool; it documents every route.
-- **`td-network-craft`** — idiomatic TD network-building technique plus the OP Snippets catalog at `data/harness/op-snippets/catalog.tsv` (a greppable index of 1386 official examples).
+- **`td-http-api`** — comprehensive guide to the HTTP bridge, friction points, and best practices.
+- **`td-network-craft`** — idiomatic TD network-building technique and patterns.
+
+**If no skills are available in the active harness**, the skills are available through the HTTP API itself, which is fully self-contained and documented at `http://127.0.0.1:3031/docs` — you can work entirely through that.
 
 ## 2. Register the docs MCP
 
-For any TouchDesigner operator or Python-API question, query the **`td-docs-mcp`** MCP server — it holds the near-complete official TD documentation. Use it instead of relying on training data.
+For any TouchDesigner operator or Python-API question, query the **`td-docs-mcp`** [MCP server](https://github.com/cacheflowe/td-docs-mcp) — it holds the near-complete official TD documentation. Use it instead of relying on training data.
 
 After registering it, make one lightweight documentation query to verify that the server is available. Do not treat registration alone as a successful connection.
+
+If it's not available, let me know and suggest helping me install it from the [td-docs-mcp GitHub repository](https://github.com/cacheflowe/td-docs-mcp). If it is available, report that it's ready.
 
 ## 3. Confirm the connection
 
@@ -50,13 +54,13 @@ It returns JSON describing the network currently open in the TD UI.
 
 Everything **mutates live project state** — it's real, with no undo guarantees. Confirm destructive steps before running them.
 
-When writing `/run` scripts, save them to a file and POST with `curl --data-binary @file` — not shell heredocs, which mangle backslashes.
+When writing `/run` scripts, save them to a file in /tmp and POST with `curl --data-binary @file` — not shell heredocs, which mangle backslashes.
 
 ## First action
 
 Complete the startup checks before waiting for work:
 
-1. Confirm that **`td-http-api`** and **`td-network-craft`** were found and loaded.
+1. Confirm that **`td-http-api`** and **`td-network-craft`** were found and loaded into context as your high-level operation manual.
 2. Confirm that **`td-docs-mcp`** is available by completing the lightweight documentation query.
 3. Confirm the HTTP bridge with the `/network` request.
 4. Report a concise readiness status for each check. If any check fails, say exactly which one failed and include the relevant error instead of implying that the session is ready.
