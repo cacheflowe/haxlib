@@ -1620,6 +1620,73 @@ def _route_diff(request, response, pars, **_):
 	_ok_json_sorted(response, diff_networks(before, after))
 
 
+def _route_pars(request, response, pars, **_):
+	"""GET /pars?path=<node> returns exhaustive parameter catalog for that node."""
+	target = _resolve_op(_first_param(pars, 'path'))
+	result = {}
+	for par in target.pars('*'):
+		entry = {
+			'label': par.label,
+			'page': par.page.name if hasattr(par, 'page') and par.page else None,
+			'mode': par.mode.name,
+			'default': _par_json_value(par) if par.isDefault else None,
+		}
+		if par.isOP:
+			entry['isOP'] = True
+		if par.isInt:
+			entry['isInt'] = True
+		elif par.isFloat:
+			entry['isFloat'] = True
+		elif par.isToggle:
+			entry['isToggle'] = True
+		elif par.isMenu:
+			entry['isMenu'] = True
+			try:
+				entry['menuNames'] = par.menuNames
+				entry['menuLabels'] = par.menuLabels
+			except Exception:
+				pass
+		result[par.name] = entry
+	_ok_json_sorted(response, result)
+
+
+def _route_opinfo(request, response, pars, **_):
+	"""GET /opinfo?opType=<type> returns schema info about an operator type:
+	expected wire inputs, OP-reference parameters, and other structural hints."""
+	opType = _first_param(pars, 'opType')
+	if not opType:
+		raise ValueError("missing required 'opType' query parameter")
+	
+	# Create a dummy instance to introspect
+	try:
+		dummy = op('/').create(opType, '_schema_probe')
+	except Exception as e:
+		raise ValueError(f"cannot create operator of type '{opType}': {e}")
+	
+	try:
+		# Count wire inputs
+		wireInputCount = len(dummy.inputConnectors) if hasattr(dummy, 'inputConnectors') else 0
+		
+		# Find OP-reference parameters
+		opRefParams = []
+		for par in dummy.pars('*'):
+			if par.isOP:
+				opRefParams.append({
+					'name': par.name,
+					'label': par.label,
+					'allowMultiple': False,  # conservative default
+				})
+		
+		result = {
+			'opType': opType,
+			'wireInputCount': wireInputCount,
+			'opRefParams': opRefParams,
+		}
+		_ok_json_sorted(response, result)
+	finally:
+		dummy.destroy()
+
+
 # Dispatch table - maps URI → handler function.
 _ROUTES = {
 	'/network':              _route_network,
@@ -1642,6 +1709,8 @@ _ROUTES = {
 	'/chop':                 _route_chop,
 	'/dat':                  _route_dat,
 	'/par':                  _route_par,
+	'/pars':                 _route_pars,
+	'/opinfo':               _route_opinfo,
 	'/create':               _route_create,
 	'/create-from-template': _route_create_from_template,
 	'/wire':                 _route_wire,

@@ -363,6 +363,57 @@ Reusable network patterns, extracted from analyzing a real hand-built network vi
 
 **Instantiate one with `/create-from-template`** — e.g. `POST /create-from-template?template=simple_feedback_loop&parent=/project1/SomeComp&sourceFile=D:/path/to/video.mp4`. Verified to produce an exact structural match (same positions, params, wires, and references) to the hand-built reference instance. Node creation happens in a first pass (so every template-local name resolves to a real op before any `ref` gets applied), then pars, then wires.
 
+## New Routes (Friction Point Fixes)
+
+### GET `/pars?path=<node>` — Exhaustive Parameter Catalog
+
+**Problem it solves:** When building networks programmatically, guessing parameter names leads to failed builds (e.g. `rad0` instead of `radx` on a `torusPOP`, `attscope` instead of `attribscope` on a `poptoCHOP`). The only way to discover the real names was a `/run` introspection round trip.
+
+**Response:** JSON dictionary mapping every parameter name to a metadata object:
+
+```json
+{
+  "radx": { "label": "Radius X", "page": "Torus", "mode": "EXP", "isFloat": true },
+  "attribscope": { "label": "Attribute Scope", "page": "Common", "mode": "MENU", "isMenu": true, "menuNames": ["point", "prim", ...], "menuLabels": [...] }
+}
+```
+
+**Usage pattern:** Before writing a multi-node build script, call `/pars` on each operator type about to be used. Surfaces all naming mismatches upfront in one batch, avoiding discover-one-failure-at-a-time loops.
+
+### GET `/opinfo?opType=<type>` — Operator Schema (Wire Inputs & OP-Reference Parameters)
+
+**Problem it solves:** An operator's external input signature isn't documented in the UI or accessible via Python params. A `poptoCHOP` takes its source via a `pop` parameter (not a wire), while most CHOPs expect wired inputs — there's no way to know which pattern without trial-and-error.
+
+**Response:** JSON object with wire-input count and list of OP-reference parameters:
+
+```json
+{
+  "opType": "poptoCHOP",
+  "wireInputCount": 0,
+  "opRefParams": [{ "name": "pop", "label": "POP", "allowMultiple": false }]
+}
+```
+
+**Usage pattern:** Before `/create` and `/wire` in a build, query `/opinfo` for each node type. Decides deterministically whether to `/wire` or set a `/par` — no more guessing.
+
+## Friction Points & Mitigations (Lessons from the Field)
+
+Learned during live use of the API on a fresh project. These are already best-practice patterns, but worth elevating so future users don't re-discover them:
+
+1. **Don't assume channel/attribute names; verify them.** Runtime operators like `poptoCHOP` generate channel names from config—they're not predictable from the UI alone (e.g. `nameformat=basic` may produce lowercase `p0`/`p1`/`p2`, not `P_0`). Always call `GET /chop` (or `/dat`) to read back the actual generated names before wiring a downstream reference to them.
+
+2. **Download `/examples.tsv` once locally; don't query `/examples` repeatedly.** The `/examples?q=<term>` endpoint returns summarized/truncated JSON. For large result sets, use `curl -s .../examples.tsv > catalog.tsv` once, then `grep -i <term> catalog.tsv` locally. Faster, cheaper, and gives exact untruncated matches.
+
+3. **Parse `/run` responses as `{output, [error]}` before inspection.** Improper parsing can send large responses to `temp` files, losing readability. The correct pattern: `curl ... | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('output') or d.get('error'))"`. Keeps output inline.
+
+4. **Use `$TMPDIR` for temporary script files, not `/tmp`.** `/tmp` is sandboxed read-only in some environments. Always default to `os.environ.get('TMPDIR')` for any local scratch file.
+
+5. **Use `/network` for introspection, not custom `/run` walking.** The API already provides `GET /network?path=<comp>&recursive=true` for full structure with utility-node resolution. Don't re-implement tree-walking and param serialization in a `/run` script — that's a code smell that a new route should be born.
+
+6. **Don't mix `/tmp` and project-local `tmp/` directory.** When creating temporary `/run` script files, always use `tmp/` (the project-local directory), never `/tmp` or system temp. Mark them with a distinct prefix (`td_run_<purpose>.py`) and delete after verification.
+
+7. **Batch parameter introspection before building.** If a build will create multiple different node types, run `/pars` for all of them in one pass (via `/run` if needed) before the first `/create`. Discovers naming conflicts upfront.
+
 ## Roadmap / ideas not yet built
 
 - **`/checkpoint` + `/restore` (JSON-based, not `.tox`)** — discussed but not yet built. Design: a checkpoint is the same node/wire/par schema `instantiate_template()` already knows how to replay, but capturing *every* param (not just non-default ones, per `_get_customized_pars`) plus DAT text/csv content for every node in a COMP. Restore = delete the COMP's current children, replay the checkpoint through the same instantiation logic `/create-from-template` uses. Tradeoff: won't be as bit-perfect as a real `.tox` (extension state, some exotic built-in flags might not round-trip) — good enough for "undo my last batch of agent edits," not a full project-level backup replacement.

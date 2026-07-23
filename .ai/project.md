@@ -40,6 +40,10 @@ Detailed guidance lives in `.ai/skills/` and `docs/`. Reference these before wri
 - [.ai/skills/td-replicator.md](.ai/skills/td-replicator.md) — onReplicate callback, layout anchoring, clone sync
 - [.ai/skills/td-wiring.md](.ai/skills/td-wiring.md) — programmatic node wiring, Connector class, setInputs
 
+### Live Project Access (HTTP Bridge)
+- [.ai/skills/td-http-api.md](.ai/skills/td-http-api.md) — **required reading** — HTTP bridge routes (`/network`, `/create`, `/par`, `/pars`, `/opinfo`, `/run`, etc.), friction points, best practices for avoiding round-trip guessing, template system
+- [.ai/prompts/td-agent-init.md](.ai/prompts/td-agent-init.md) — orientation checklist when starting work on a live project
+
 ### Python Environment
 - [docs/PYTHON_ENVIRONMENT.md](docs/PYTHON_ENVIRONMENT.md) — Conda (Python 3.11), venv, pipreqs, custom import patterns
 - [.ai/skills/td-python-environment.md](.ai/skills/td-python-environment.md) — tdPyEnvManager, DAT-as-module imports, TD install paths
