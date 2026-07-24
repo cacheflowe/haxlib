@@ -12,7 +12,7 @@ data/text/app-store.tsv
 TDPyEnvManagerContext.json
 
 # Demos/WIP
-tox/demo
+# tox/demo
 
 # Other common ignores
 _assets
