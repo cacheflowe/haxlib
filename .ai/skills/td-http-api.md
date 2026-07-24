@@ -38,7 +38,7 @@ Two different reload mechanisms are in play, and mixing them up is the most comm
 | What changed | How it gets picked up |
 |---|---|
 | `td_http_api.py` itself | The Callbacks DAT's file-sync must refresh (usually automatic; if a brand-new route 404s right after editing, manually reload the Text DAT's file sync once) |
-| Any other project Python module (`td_util.py`, `App.py`, etc.) | `GET /reload` — hits `op.App.ReloadModules()` → `config.ReloadModules()`, which walks `python/`, `python/util/`, `python/extensions/`, `python/net/` and `importlib.reload()`s anything already in `sys.modules` |
+| Any other project Python module (`td_util.py`, `App.py`, etc.) | `GET /reload` — hits `op.App.ReloadModules()` → `config.ReloadModules()`, which walks `python/`, `python/util/`, `python/app/`, `python/net/` and `importlib.reload()`s anything already in `sys.modules` |
 
 `/reload` itself reloads `td_http_api.py` too (it's a normal file-based module from `config.ReloadModules()`'s point of view, in addition to being Callback-DAT content) — so the usual loop when iterating is: edit the file → `curl .../reload` → retest.
 

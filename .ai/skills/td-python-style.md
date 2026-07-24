@@ -158,7 +158,7 @@ except ValueError as e:
 project/
 ├── project.toe
 └── python/
-    ├── extensions/       # Extension classes (attached to COMPs)
+    ├── app/              # Extension classes (attached to COMPs)
     │   ├── App.py
     │   └── MyFeature.py
     ├── scripts/          # Standalone scripts
@@ -169,7 +169,7 @@ project/
         └── net/
 ```
 
-- Extensions in `python/extensions/`
+- Extensions in `python/app/`
 - Utilities in `python/util/`
 - Import via `mod.module_name`
 

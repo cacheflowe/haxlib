@@ -279,7 +279,7 @@ touchdesigner/
 ```
 
 ### Externalizing Python Files
-- Extension files are externalized to `python/extensions/`
+- Extension files are externalized to `python/app/`
 - Utility modules are externalized to `python/util/`
 - Use `mod.module_name` to import externalized modules:
 ```python

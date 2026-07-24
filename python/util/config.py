@@ -106,7 +106,7 @@ def ReloadModules():
 	tdTypes = {k: v for k, v in vars(td).items() if not k.startswith('_')}
 	reloaded = []
 	skipped = []
-	subdirs = ['python', 'python/util', 'python/extensions', 'python/net']
+	subdirs = ['python', 'python/util', 'python/app', 'python/net']
 	for subdir in subdirs:
 		for filepath in glob.glob(os.path.join(td.project.folder, subdir, '*.py')):
 			modName = os.path.splitext(os.path.basename(filepath))[0]
