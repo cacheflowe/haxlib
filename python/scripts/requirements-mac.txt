@@ -1,7 +1,0 @@
-pyautogui # for GUI automation
-pytesseract # for OCR
-protobuf>=3.19.4,<4.0.0 # For mediapipe compatibility
-pillow # for image processing
-numpy==1.24.4 # 1.24.4 is the latest version that works with TD 
-mediapipe # for computer vision tasks
-onnxruntime==1.17.0
