@@ -31,6 +31,26 @@ All cross-references inside `.ai/` source files (links to skills, docs, or other
   4. **`README.md`** (root) — Entry point.
 * **Key principle**: Code changes that alter behavior must update the corresponding docs under `docs/` or `.ai/` in the same work.
 
+
+---
+
+## Agent Learnings Log
+This project keeps a living log of hard-won coding discoveries at [`docs/learnings/`](docs/learnings/). Read it before debugging; write to it after solving anything non-obvious or that took significant effort or iterations.
+
+**Read first when:**
+- Debugging any code issues issue — check [`docs/README.md`](docs/README.md) for prior solutions before digging into source code.
+- Something "should work" per the docs but doesn't — an existing entry may explain it.
+
+**Write an entry when:**
+- You fix a bug that cost real investigation time and isn't in official docs.
+- You discover a pattern or failure mode specific to this stack's versions.
+- Your reasoning took multiple iterations to get right, and you want to save time for future agents.
+- Format: **Symptom → Root cause → Fix** + a code snippet if useful. Keep it short. Add to the most relevant file in `docs/learnings/`, or create a new topic file.
+
+**Manage the log like code**
+- Each entry is a discrete unit of knowledge. The collection is a shared resource for all agents to consult and contribute to.
+- Be sure to update docs/README.md with new files or sections as the log grows.
+
 ---
 
 ## Source Accuracy & Drafting Protocol

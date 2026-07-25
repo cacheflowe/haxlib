@@ -2,7 +2,13 @@
 
 How to verify that commands, skills, MCP servers, and the shared context files
 (`AGENTS.md` / `CLAUDE.md` / `.github/copilot-instructions.md`) are actually
-visible to each harness: **Claude Code**, **GitHub Copilot**, and **Codex**.
+visible to each harness: **Claude Code**, **GitHub Copilot**, **Codex**, and
+**Antigravity CLI**.
+
+> **Note:** Antigravity CLI (`agy`) is the successor to Gemini CLI and shares
+> Codex's `.agents/` layout for skills, context, and MCP. Most "Codex" steps
+> below apply identically to Antigravity — call-outs are added where they
+> diverge.
 
 ## 0. Prerequisite: run the sync
 
@@ -17,14 +23,13 @@ Then confirm the generated targets exist:
 | Check | Path |
 |---|---|
 | Claude Code context | `CLAUDE.md` (root) |
-| Codex / generic context | `AGENTS.md` (root) |
-| Gemini context | `GEMINI.md` (root) |
+| Codex / Antigravity / generic context | `AGENTS.md` (root) and `.agents/context/AGENTS.md` |
 | Copilot context | `.github/copilot-instructions.md` |
 | Claude Code skills/commands | `.claude/skills/<name>/SKILL.md` |
 | Copilot skills | `.github/skills/<name>/SKILL.md` |
 | Copilot prompts | `.github/prompts/<name>.prompt.md` |
-| Gemini CLI commands | `.gemini/commands/run/<name>.toml` (invoked as `/run:<name>`) |
-| Codex skills | `.agents/skills/<name>/SKILL.md` (gitignored — exists only after sync) |
+| Codex / Antigravity skills + prompts | `.agents/skills/<name>/SKILL.md` (gitignored — exists only after sync) |
+| Antigravity MCP profile | `.agents/mcp_config.json` (gitignored, generated) |
 
 If a target is missing, the harness can't see it — fix the sync before debugging
 the harness.
@@ -38,14 +43,14 @@ The repo ships a canary prompt for exactly this purpose:
 
 **Invocation syntax varies by surface:**
 
-- CLI tools (Claude Code CLI, Codex CLI, Copilot CLI) generally use `/name`.
-- All three CLIs also support a `/skills` command (each in a slightly
+- CLI tools (Claude Code CLI, Codex CLI, Antigravity CLI `agy`, Copilot CLI) generally use `/name`.
+- All four CLIs also support a `/skills` command (each in a slightly
   different form) that lists the skills the harness has discovered. This is
   the quickest way to confirm each CLI can see the skills synced/symlinked
   into its agent directory (`.claude/skills/`, `.agents/skills/`,
   `.github/skills/`) — if a skill is missing from the list, the sync or
   symlink is the problem, not the skill content.
-- Codex additionally supports `$name` to mention a skill directly in a message.
+- Codex and Antigravity additionally support `$name` to mention a skill directly in a message.
 - IDE chat windows (Copilot Chat, Claude Code extension) often have weaker or
   slower skill autocomplete than the CLIs — a skill that doesn't show up in
   the `/` dropdown may still work when typed in full. Don't conclude a skill
@@ -68,29 +73,15 @@ The repo ships a canary prompt for exactly this purpose:
 3. If missing: check that prompt files are enabled
    (`chat.promptFiles` setting) and reload the window.
 
-### Codex
+### Codex / Antigravity CLI
 
-1. Type `/skills` to list, or `$example-command` to invoke directly.
-2. If missing: run the sync (`.agents/skills/` is gitignored and must be
+1. Type `/skills` to list, or `$example-command` to invoke directly. Both
+   harnesses read the same `.agents/skills/` tree, so the same command shows
+   up in both.
+2. In Antigravity, you can also run `agy plugin import gemini` once to migrate
+   any legacy Gemini CLI commands — they convert to skills automatically.
+3. If missing: run the sync (`.agents/skills/` is gitignored and must be
    regenerated after every clone), and confirm the project is trusted.
-
-### Gemini CLI
-
-1. Run `/commands list` — `run:example-command` should appear (sourced from
-   `.gemini/commands/run/example-command.toml`). The `run:` prefix is intentional —
-   it namespaces our generated commands so they don't collide with skills
-   that Gemini auto-discovers from `.agents/skills/`.
-2. Run `/run:example-command` and confirm the Hello World output (one-shot
-   execution).
-3. For comparison, `/skill example-command` *activates* the same prompt as a skill
-   (loads the full SKILL.md into context but doesn't execute) — different
-   mechanism, same source file. Prefer `/run:<name>` for one-shot prompts:
-   it sends the prompt body once and exits, while `/skill <name>` keeps the
-   entire skill loaded across turns (more tokens, lingers in context).
-4. After editing a command, run `/commands reload` to pick up changes
-   without restarting the CLI.
-5. If missing: confirm `.gemini/commands/run/example-command.toml` exists, starts
-   with the `# ai-sync-generated` marker, and contains a `prompt` field.
 
 ## 2. Testing skills (implicit invocation)
 
@@ -127,8 +118,8 @@ instructions — three separate links in the chain.
 problem is the skill content vs. the description trigger):
 
 - Claude Code: `/validate-harness-sync` (or type the name after `/`)
-- Codex: `$validate-harness-sync`
-- Copilot / Gemini: mention the skill name directly in your message
+- Codex / Antigravity CLI: `$validate-harness-sync`
+- Copilot: mention the skill name directly in your message
 
 **A passing run** produces a PASS/FAIL table covering source files, composed
 context files, synced skills/prompts, MCP config, and the sync manifest — see
@@ -144,7 +135,7 @@ session).
 Use a **canary token** to prove the file is in the agent's context, rather than
 asking "did you read CLAUDE.md?" (models will often say yes regardless).
 
-1. Add a distinctive, un-guessable line to `.ai/project.md`, e.g.:
+1. Add a distinctive, un-guessable line to `.ai/AGENTS.md`, e.g.:
 
    ```markdown
    <!-- canary: the project mascot is a purple axolotl named Reginald -->
@@ -158,22 +149,41 @@ asking "did you read CLAUDE.md?" (models will often say yes regardless).
 |---|---|
 | Claude Code | Answers from `CLAUDE.md` without reading any file |
 | Copilot Chat | Answers from `.github/copilot-instructions.md` (check `github.copilot.chat.codeGeneration.useInstructionFiles` is enabled) |
-| Codex | Answers from root `AGENTS.md` |
-| Gemini CLI | Answers from `GEMINI.md` |
+| Codex | Answers from root `AGENTS.md` (or `.agents/context/AGENTS.md`) |
+| Antigravity CLI | Answers from root `AGENTS.md` (or `.agents/context/AGENTS.md`) |
 
 5. Remove the canary and re-sync when done.
 
-A correct answer proves the full chain: `.ai/project.md` → sync → generated
+A correct answer proves the full chain: `.ai/AGENTS.md` → sync → generated
 file → harness context. A wrong answer (or a file-read tool call before
 answering) tells you which link is broken.
 
 ## 4. Testing MCP servers
 
 MCP config source is `.ai/mcp-servers.json`, synced to `.mcp.json` (Claude
-Code/Copilot), `.codex/config.toml` (Codex), and merged into
-`.gemini/settings.json` (Gemini CLI). If `.ai/mcp-servers.json` doesn't exist
-yet, there's nothing to test — see
-[.ai/docs/harness-support.md](.ai/docs/harness-support.md) for config formats.
+Code/Copilot), `.pi/mcp.json` (`.pi` agent harness), `.codex/config.toml`
+(Codex), and `.agents/mcp_config.json` (Antigravity CLI). When `mcpServers`
+is empty the sync skips all four
+destinations — see [.ai/docs/harness-support.md](.ai/docs/harness-support.md)
+for config formats.
+
+### Canary: the `everything` server
+
+The starter ships with `@modelcontextprotocol/server-everything` pre-wired —
+Anthropic's reference test server that exposes simple tools like `echo`,
+`add`, and `printEnv`. Use it for a quick end-to-end MCP wiring check before
+adding real servers:
+
+1. After sync, the server appears as `everything` in every harness's MCP
+   list (instructions per harness below).
+2. Ask the agent: *"Use the `everything` MCP server to echo 'hello'"* — you
+   should see a tool-confirmation prompt, then the echoed string back.
+3. If the call succeeds, MCP wiring is good end-to-end. Remove or replace
+   the `everything` entry in `.ai/mcp-servers.json` once you have your own
+   servers to wire up. Re-run the sync to propagate the change.
+
+> First invocation may take a few seconds while `npx -y` fetches the
+> package. Subsequent calls are instant.
 
 ### Claude Code
 
@@ -200,18 +210,19 @@ yet, there's nothing to test — see
    if not, the sync script treats it as user-owned and won't update it.
 3. Invoke a tool in a session and verify the call in the transcript.
 
-### Gemini CLI
+### Antigravity CLI
 
-1. Confirm `.gemini/settings.json` contains your server under `mcpServers`
-   after running the sync (the sync merges this key and preserves any other
-   settings in the file).
-2. Inside a session, run `/mcp` — each connected server should list its
-   Tools, Prompts, and Resources.
-3. If the server exposes resources, type `@` and confirm
-   `@server://resource/path` URIs appear in the completion menu alongside
-   file paths.
-4. Invoke a tool and confirm the confirmation prompt appears (unless the
-   server is configured with `trust: true`, which bypasses confirmations).
+1. Confirm `.agents/mcp_config.json` exists after sync and contains
+   `"_ai_sync_generated": true` at the top level — this flag tells the sync
+   it's safe to regenerate. A hand-edited file without that flag is preserved
+   untouched.
+2. Confirm any remote servers use the `serverUrl` key (the sync auto-renames
+   legacy `url` / `httpUrl` fields during generation).
+3. Inside an `agy` session, MCP tool calls show a confirmation prompt before
+   invocation (standard MCP UX) — accept it and verify the call in the
+   transcript.
+4. Invoke a tool whose output you can independently verify and compare
+   against ground truth.
 
 ### Generic MCP smoke test
 
@@ -230,5 +241,5 @@ via the MCP server") and compare against ground truth.
 - **Copilot ignoring instructions** → confirm
   `useInstructionFiles` is enabled and the file is at
   `.github/copilot-instructions.md` exactly.
-- **Codex missing skills after clone** → `.agents/skills/` is gitignored;
+- **Codex / Antigravity missing skills after clone** → `.agents/skills/` is gitignored;
   run the sync.
