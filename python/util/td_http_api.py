@@ -633,6 +633,42 @@ def _route_reload(request, response, pars, **_):
 	_ok_json(response, {'reloaded': reloaded, 'skipped': skipped})
 
 
+def _route_save(request, response, pars, **_):
+	"""Save the current project (.toe) to disk via project.save() -- the Ctrl+S equivalent.
+	Does not touch external .tox files unless 'saveExternalToxs' is set -- see /save-external-tox
+	for saving one specific external-tox-backed COMP without saving the whole project."""
+	_require_write_method(request, '/save')
+	path = _first_param(pars, 'path')
+	save_external_toxs = _bool_param(pars, 'saveExternalToxs', False)
+	saved = project.save(path, saveExternalToxs=save_external_toxs) if path else project.save(saveExternalToxs=save_external_toxs)
+	_ok_json(response, {
+		'saved': bool(saved),
+		'path': path or (project.folder + '/' + project.name),
+		'saveExternalToxs': save_external_toxs,
+	})
+
+
+def _route_save_external_tox(request, response, pars, **_):
+	"""Save one COMP's contents out to its own referenced external .tox file via
+	COMP.saveExternalTox() -- independent of /save and its 'saveExternalToxs' flag, and
+	independent of whether the COMP is currently flagged dirty. Intended for authoring/maintenance
+	work on a specific external-tox-backed COMP (e.g. re-exporting a packaged drop-in tool after
+	a code change) without saving the whole project."""
+	_require_write_method(request, '/save-external-tox')
+	path = _first_param(pars, 'path')
+	if not path:
+		raise ValueError("missing required 'path' query parameter (a COMP referencing an external .tox)")
+	comp = _resolve_op(path)
+	if not comp.isCOMP:
+		raise ValueError(f"'{comp.path}' is not a COMP")
+	externaltox = comp.par.externaltox.eval() if hasattr(comp.par, 'externaltox') else ''
+	if not externaltox:
+		raise ValueError(f"'{comp.path}' has no external .tox configured (externaltox is blank)")
+	recursive = _bool_param(pars, 'recursive', False)
+	count = comp.saveExternalTox(recurse=recursive)
+	_ok_json(response, {'path': comp.path, 'externaltox': externaltox, 'recursive': recursive, 'saved': count})
+
+
 def _route_health(request, response, pars, webServerDAT, **_):
 	node_paths = _first_param(pars, 'nodes')
 	stats = []
@@ -1532,6 +1568,60 @@ def _route_move(request, response, pars, **_):
 	_ok_json(response, [_node_summary(n) for n in targets])
 
 
+def _route_layout(request, response, pars, **_):
+	"""Lay out operators via COMP.layout() -- the Python equivalent of TouchDesigner's Shift+L
+	'Layout Nodes' command. Arranges the given ops in a line or grid, snapping them into a clean,
+	non-overlapping arrangement relative to their wiring, instead of guessing x/y by hand. Returns
+	the updated node summaries so the caller can verify the result inline, without a follow-up
+	/network call."""
+	_require_write_method(request, '/layout')
+	paths_param = _first_param(pars, 'paths')
+	parent_param = _first_param(pars, 'parent')
+	horizontal = _bool_param(pars, 'horizontal') if _first_param(pars, 'horizontal') is not None else None
+	vertical = _bool_param(pars, 'vertical') if _first_param(pars, 'vertical') is not None else None
+	grid_rows_raw = _first_param(pars, 'gridRows')
+	grid_rows = int(grid_rows_raw) if grid_rows_raw else 0
+
+	modes_given = sum(1 for m in (horizontal, vertical, grid_rows) if m)
+	if modes_given > 1:
+		raise ValueError("specify only one of 'horizontal', 'vertical', or 'gridRows'")
+
+	if paths_param:
+		targets = [_resolve_op(p.strip()) for p in paths_param.split(',') if p.strip()]
+		if not targets:
+			raise ValueError("no valid operators found in 'paths'")
+		parent = _resolve_op(parent_param) if parent_param else targets[0].parent()
+	else:
+		targets = None  # let COMP.layout() default to laying out all of parent's children
+		parent = _resolve_op(parent_param) if parent_param else _get_current_network()
+
+	if not parent.isCOMP:
+		raise ValueError(f"'{parent.path}' is not a COMP, can't layout its children")
+
+	if horizontal:
+		layout_kwargs = {'horizontal': True}
+	elif vertical:
+		layout_kwargs = {'vertical': True}
+	elif grid_rows:
+		layout_kwargs = {'gridRows': grid_rows}
+	else:
+		layout_kwargs = {'horizontal': True}  # default: arrange left-to-right along the wiring
+
+	if targets is not None:
+		parent.layout(targets, **layout_kwargs)
+		result_nodes = targets
+	else:
+		parent.layout(**layout_kwargs)
+		result_nodes = _nodes_in_comp(parent)
+
+	_ok_json(response, {
+		'parent': parent.path,
+		'mode': next(iter(layout_kwargs)),
+		'count': len(result_nodes),
+		'nodes': [_node_summary(n) for n in sorted(result_nodes, key=lambda n: n.path)],
+	})
+
+
 def _route_delete(request, response, pars, **_):
 	if request['method'] not in ('POST', 'DELETE'):
 		raise MethodNotAllowedError("/delete requires POST or DELETE")
@@ -1695,6 +1785,8 @@ _ROUTES = {
 	'/select':               _route_select,
 	'/insert':               _route_insert,
 	'/reload':               _route_reload,
+	'/save':                 _route_save,
+	'/save-external-tox':    _route_save_external_tox,
 	'/health':               _route_health,
 	'/server-info':          _route_server_info,
 	'/docs':                 _route_docs,
@@ -1720,6 +1812,7 @@ _ROUTES = {
 	'/flag':                 _route_flag,
 	'/annotate':             _route_annotate,
 	'/move':                 _route_move,
+	'/layout':               _route_layout,
 	'/delete':               _route_delete,
 	'/bounds':               _route_bounds,
 	'/errors':               _route_errors,
