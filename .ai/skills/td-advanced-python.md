@@ -41,9 +41,9 @@ Four equivalent ways to import a Text DAT named `onnx_util`:
 import onnx_util
 onnx_util = mod.onnx_util
 onnx_util = mod('onnx_util')                      # can be a path too
-onnx_util = mod(f'{op.PyUtils}/onnx_util')        # with a global op ref
-onnx_util = op.PyUtils.Get('onnx_util')           # need to reimport if source changes
-ONNXInferenceManager = mod(f'{op.PyUtils}/onnx_inference_manager').ONNXInferenceManager
+onnx_util = mod(f'{op.PyUtils}/onnx_util')        # [deprecated] with a global op ref
+onnx_util = op.PyUtils.Get('onnx_util')           # [deprecated] need to reimport if source changes
+ONNXInferenceManager = mod(f'{op.PyUtils}/onnx_inference_manager').ONNXInferenceManager # [deprecated]
 ```
 
 ## External Module Support

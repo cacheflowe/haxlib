@@ -21,13 +21,20 @@ The most practical path for running ML models in TD. Use `onnxruntime-gpu` for G
 
 ```bash
 # Install with TD's Python for compatibility
-& "C:\Program Files\Derivative\TouchDesigner\bin\python.exe" -m pip install onnxruntime-gpu==1.17.0 --target="../_local_modules"
+& "C:\Program Files\Derivative\TouchDesigner\bin\python.exe" -m pip install onnxruntime-gpu==1.22.0 --target="../_local_modules"
 
 # Or via pip with CUDA 11 index
 pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-11/pypi/simple/
 ```
 
-Version 1.17 is confirmed GPU-compatible with TD.
+Version 1.22.0 is confirmed GPU-compatible with the latest TouchDesigner. **Pin `nvidia-cudnn-cu12` explicitly** alongside it — leaving it unpinned lets pip resolve whatever cudnn 9.x point release is newest at install time, and some of those regress the CUDA execution provider's conv engine selection (silent fallback to CPU, no crash). Known-good combo:
+
+```
+onnxruntime-gpu[cuda,cudnn]==1.22.0
+nvidia-cudnn-cu12==9.11.0.98
+```
+
+See [docs/learnings/onnx-runtime.md](../../docs/learnings/onnx-runtime.md) for the full failure signature and debugging steps.
 
 ### Integration Pattern
 
