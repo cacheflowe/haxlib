@@ -1,6 +1,11 @@
 numpy==2.1.2
 onnxruntime-gpu[cuda,cudnn]==1.22.0
+nvidia-cudnn-cu12==9.11.0.98
 pyautogui
 python-escpos
 pywinusb
 qrcode[pil]
+
+
+# Working project (touchdesigner-onnx): nvidia_cudnn_cu12 9.11.0.98
+# This project (haxlib): nvidia_cudnn_cu12 9.24.0.43

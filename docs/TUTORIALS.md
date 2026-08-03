@@ -197,6 +197,12 @@
     * [Format Bending #1 - Image2Audio2Image/wavetable weirdness](https://www.youtube.com/watch?v=NtpqL53gyqc)  
     * [Organic Growth - TouchDesigner Tutorial 07](https://www.youtube.com/watch?v=ZWwWxIXHubM)
     * [How to Build a Sphere Rolling Along Twisted Bricks with POPX](https://youtu.be/Tz2GzJAijEk)
+    * [Build Texture-Driven 3D Systems in TouchDesigner](https://www.youtube.com/watch?v=FzugbBNACG4)
+    * [Working with Color in POPs](https://learn.derivative.ca/courses/100-fundamentals/lessons/109-pops-working-with-points/topic/working-with-color-in-pops/)
+    * [Audio Reactive TUTORIAL - Spectral Network](https://www.youtube.com/watch?v=1xBqRqF0DKI)
+    * [Control Organic Forms with Your Phone Screen](https://www.youtube.com/watch?v=ZCQ61PIjZYg)
+    * [Dynamic Texture Grids](https://www.youtube.com/watch?v=Eq5amV7obwg)
+    * [Nvidia Flex Emitter and Collision Basics](https://www.youtube.com/watch?v=F3HgBBCaqyg)
     * Unreal integrations  
       * [TouchDesigner and Unreal Engine Integrations](https://www.youtube.com/watch?v=Nd9Ld-R_AxA) (gpu particles)  
 * Channels  
