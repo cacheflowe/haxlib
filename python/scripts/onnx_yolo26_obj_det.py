@@ -12,6 +12,7 @@ import object_tracker
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 ByteTracker = object_tracker.ByteTracker
 _nms = object_tracker.nms
+_track_color = object_tracker.track_color
 
 # COCO class names (80 classes, used by YOLO26)
 COCO_CLASSES = {
@@ -570,8 +571,9 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 		tbl.appendRow(['track_id', 'class_id', 'class_name', 'score',
 					'cx', 'cy', 'w', 'h',
 					'x_left', 'x_right', 'y_top', 'y_bottom',
-					'vx', 'vy', 'lost_frames', 'total_frames'])
+					'vx', 'vy', 'lost_frames', 'total_frames', 'r', 'g', 'b'])
 		for obj in self.tracked_objects:
+			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
 				obj['track_id'], obj['class_id'], obj['class_name'],
 				f"{obj['score']:.3f}",
@@ -581,6 +583,7 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
 				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
 				obj['lost_frames'], obj['total_frames'],
+				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
 			])
 
 

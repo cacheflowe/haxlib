@@ -12,6 +12,7 @@ import object_tracker
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 ByteTracker = object_tracker.ByteTracker
 _nms = object_tracker.nms
+_track_color = object_tracker.track_color
 
 # ==================== MODEL OUTPUT FORMAT ====================
 # yolo26n-pose.onnx is an Ultralytics end2end (NMS-free) export.
@@ -536,9 +537,10 @@ class YOLO26PoseInference(ONNXInferenceManager):
 					'cx', 'cy', 'w', 'h',
 					'x_left', 'x_right', 'y_top', 'y_bottom',
 					*kpt_header,
-					'vx', 'vy', 'lost_frames', 'total_frames'])
+					'vx', 'vy', 'lost_frames', 'total_frames', 'r', 'g', 'b'])
 		for obj in self.tracked_objects:
 			flat_kpts = [v for kp in obj['keypoints'] for v in kp]  # 17*3 flat list
+			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
 				obj['track_id'],
 				f"{obj['score']:.3f}",
@@ -549,6 +551,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 				*[f"{v:.4f}" for v in flat_kpts],
 				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
 				obj['lost_frames'], obj['total_frames'],
+				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
 			])
 
 	def write_joints_bones_to_tables(self):

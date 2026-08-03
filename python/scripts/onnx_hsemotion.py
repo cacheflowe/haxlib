@@ -622,10 +622,12 @@ class HSEmotionInference(ONNXInferenceManager):
 			'x_left', 'x_right', 'y_top', 'y_bottom', 'vx', 'vy',
 			'lost_frames', 'total_frames', 'emotion_label']
 		header += [f'emotion_{name.lower()}' for name in EMOTION_CLASSES]
+		header += ['r', 'g', 'b']
 		tbl.appendRow(header)
 		for obj in self.tracked_objects:
 			scores = obj['emotion_scores']
 			score_strs = [f"{s:.4f}" for s in scores] if scores is not None else [''] * len(EMOTION_CLASSES)
+			r, g, b = _track_color(obj['track_id'])
 			row = [
 				obj['track_id'], f"{obj['score']:.3f}",
 				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
@@ -637,6 +639,7 @@ class HSEmotionInference(ONNXInferenceManager):
 				obj['emotion_label'],
 			]
 			row += score_strs
+			row += [f"{r:.4f}", f"{g:.4f}", f"{b:.4f}"]
 			tbl.appendRow(row)
 
 

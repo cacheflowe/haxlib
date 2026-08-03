@@ -208,6 +208,7 @@ weighted layer at load) — not a compatibility concern, and not evidence of cus
 
 ## TODO:
 - Current upgrade
+  - WIP: RF-DETR is mid-flight
   - Comp par: Input Aspect Ratio: `op('./in1').width / op('./in1').height`
   - Debug font size: `parent(2).op('in1').height * 0.025`
   - Eval dat for score: `str(round(float(me.inputTable[me.inputRow, 1].val) * 100)) + '%'`

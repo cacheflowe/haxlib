@@ -580,8 +580,9 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 		tbl.appendRow(['track_id', 'class_id', 'class_name', 'score',
 					'cx', 'cy', 'w', 'h',
 					'x_left', 'x_right', 'y_top', 'y_bottom',
-					'vx', 'vy', 'lost_frames', 'total_frames', 'mask_area_ratio'])
+					'vx', 'vy', 'lost_frames', 'total_frames', 'mask_area_ratio', 'r', 'g', 'b'])
 		for obj in self.tracked_objects:
+			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
 				obj['track_id'], obj['class_id'], obj['class_name'],
 				f"{obj['score']:.3f}",
@@ -592,6 +593,7 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
 				obj['lost_frames'], obj['total_frames'],
 				f"{obj['mask_area_ratio']:.4f}",
+				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
 			])
 
 

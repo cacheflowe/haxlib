@@ -985,8 +985,9 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		# either way). Same data-output scheme as onnx_yunet.py's own table_output.
 		tbl.appendRow(['track_id', 'score', 'cx', 'cy', 'w', 'h',
 			'x_left', 'x_right', 'y_top', 'y_bottom', 'vx', 'vy',
-			'lost_frames', 'total_frames', 'yaw', 'pitch', 'roll'])
+			'lost_frames', 'total_frames', 'yaw', 'pitch', 'roll', 'r', 'g', 'b'])
 		for obj in self.tracked_objects:
+			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
 				obj['track_id'], f"{obj['score']:.3f}",
 				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
@@ -996,6 +997,7 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
 				obj['lost_frames'], obj['total_frames'],
 				f"{obj['yaw']:.4f}", f"{obj['pitch']:.4f}", f"{obj['roll']:.4f}",
+				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
 			])
 
 	def write_landmarks_to_table(self):

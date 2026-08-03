@@ -12,6 +12,7 @@ import object_tracker
 # Import the base inference manager
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 ByteTracker = object_tracker.ByteTracker
+_track_color = object_tracker.track_color
 
 # ==================== CONFIGURATION ====================
 # YuNet's own facial keypoints (fixed by the model, not configurable): right eye, left
@@ -820,9 +821,10 @@ class YuNetInference(ONNXInferenceManager):
 					'x_left', 'x_right', 'y_top', 'y_bottom',
 					'vx', 'vy', 'lost_frames', 'total_frames',
 					'yaw', 'pitch', 'roll',
-					*kpt_header])
+					*kpt_header, 'r', 'g', 'b'])
 		for obj in self.tracked_objects:
 			flat_kpts = [v for kp in obj['keypoints'] for v in kp]  # 5*2 flat list
+			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
 				obj['track_id'],
 				f"{obj['score']:.3f}",
@@ -834,6 +836,7 @@ class YuNetInference(ONNXInferenceManager):
 				obj['lost_frames'], obj['total_frames'],
 				f"{obj['yaw']:.4f}", f"{obj['pitch']:.4f}", f"{obj['roll']:.4f}",
 				*[f"{v:.4f}" for v in flat_kpts],
+				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
 			])
 
 
