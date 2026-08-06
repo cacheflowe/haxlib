@@ -177,11 +177,19 @@ def _ensure_perf_par(base_comp):
 # after restart. This module-level dict is the safe replacement: it's a plain Python
 # object living in a regular imported module (never serialized with the project,
 # unlike a COMP's Storage), keyed by each script's own parent COMP path so multiple
-# concurrent scripts don't collide. It's cleared only if this module itself is
-# reloaded (a deliberate, rare action via /reload or a TD restart) -- at that point
-# any previously-registered instances become one-time orphans again, same as before
-# this whole mechanism existed, not a new problem.
-_manager_registry = {}
+# concurrent scripts don't collide.
+#
+# Guarded against globals() rather than a plain `_manager_registry = {}` so a /reload
+# of THIS module (needed whenever this file itself changes) doesn't wipe it -- confirmed
+# live this was a real gap, not just theoretical: /reload re-executes this module's
+# top-level code against its EXISTING globals() (importlib.reload() mutates the same
+# module object in place, it doesn't hand it a fresh namespace -- unlike a Callbacks
+# DAT's text reassignment, which does), so a plain reassignment here discarded every
+# already-registered instance while its worker thread and GPU session kept running
+# undisturbed, just no longer tracked -- silently disabling this whole safety net for
+# any of THOSE comps' next reload, for the rest of the TD session.
+if '_manager_registry' not in globals():
+	_manager_registry = {}
 
 
 def shutdown_and_register(comp_path, new_manager):
@@ -526,22 +534,43 @@ class ONNXInferenceManager:
 		"Create global instance" section), instead of leaking both. See
 		_ensure_worker_started()'s docstring for the full mechanism this prevents.
 
-		Sends _worker_loop() its already-implemented (but, before this fix, never
-		actually used) shutdown sentinel so the thread's `while True` loop actually
-		returns instead of blocking forever -- that's what lets Python's refcounting
-		actually collect this instance once nothing else references it. Also proactively
-		clears any ort.InferenceSession-typed attribute (self.session, plus any
-		subclass-specific extra session like a landmark/emotion model) via introspection
-		rather than requiring each subclass to override this -- so a new subclass with
-		its own extra session doesn't silently need to remember to add cleanup here too."""
+		Sends _worker_loop() its shutdown sentinel so the thread's `while True` loop
+		actually returns instead of blocking forever, then BLOCKS (joins with a timeout)
+		until it actually has -- confirmed live that without this join, the caller (the
+		script's "Create global instance" section) immediately constructs and starts
+		loading the NEW model while the OLD thread is still mid-exit, so both models'
+		CUDA memory arenas briefly coexist. On a GPU already near its limit (this
+		project's steady-state load across every ONNX_Playground comp routinely sits at
+		80%+), that transient overlap during a save-triggered script reload (TD's file-
+		sync noticing the backing .py changed and re-executing the module) is exactly
+		what tips it into running out of memory, even though nothing is permanently
+		leaked once the old thread finishes.
+
+		Also proactively clears any ort.InferenceSession-typed attribute (self.session,
+		plus any subclass-specific extra session like a landmark/emotion model) via
+		introspection rather than requiring each subclass to override this, then forces
+		ONE manual gc.collect() -- safe here specifically because this runs between
+		models, not mid-inference, unlike the periodic collection this project disabled
+		globally (see the module-level gc.disable() comment above) to avoid multi-second
+		freezes. A worker thread that held the last reference to a bound method of self
+		creates a genuine reference cycle (self -> _worker_thread -> _target -> self);
+		CPython's own threading module clears _target once the thread function returns,
+		which normally breaks that cycle via plain refcounting alone -- but any OTHER
+		cycle this class (or a subclass) doesn't yet know about would otherwise sit
+		uncollected for the life of the process with cyclic GC off."""
 		if self._worker_thread is not None and self._worker_thread.is_alive():
 			try:
 				self._work_queue.put_nowait(None)
 			except queue.Full:
 				pass  # a real inference is mid-flight; the thread exits on its NEXT get() instead
+			self._worker_thread.join(timeout=5.0)
+			if self._worker_thread.is_alive():
+				self.printONNX('shutdown(): worker thread did not exit within 5s (stuck '
+					'inference call?) -- proceeding anyway, but its session may not be freed')
 		for name, val in list(vars(self).items()):
 			if isinstance(val, ort.InferenceSession):
 				setattr(self, name, None)
+		gc.collect()
 
 	def _worker_loop(self):
 		"""Persistent background worker -- replaces the old pattern of spawning a brand
@@ -557,8 +586,8 @@ class ONNXInferenceManager:
 		"""
 		while True:
 			input_tensor = self._work_queue.get()
-			if input_tensor is None:  # shutdown sentinel, not currently ever sent (see
-				return               # _ensure_worker_started's docstring)
+			if input_tensor is None:  # shutdown sentinel -- sent by shutdown(), which then
+				return               # joins this thread; see shutdown()'s docstring
 			try:
 				t0 = time.perf_counter()
 				outputs = self.run_inference(input_tensor)
