@@ -629,3 +629,129 @@ def td_to_px(td_x, td_y, width, height):
 	coordinates for cv2 drawing -- the same `to_px` closure every draw_tracked_*()
 	method redefined locally."""
 	return int(td_x * width), int((1.0 - td_y) * height)
+
+
+def build_label(track_id, score, text=None):
+	"""Build a `table_output` 'label' column value: this track's deterministic color
+	(see track_color()) as a TD Format Codes prefix, followed by display text.
+
+	The color prefix uses TD's own inline Format Codes syntax (`{#color(r,g,b);}`,
+	0-255 integers) -- rendered only by a consuming GeoText/Text COMP that has its own
+	Format Codes par turned on (this project's shared `DebugBB` component does). This
+	exact syntax was previously hand-computed per row via a live Table DAT cell
+	expression inside DebugBB itself (`f'{{#color({{r}}, {{g}}, {{b}});}}{{text}}'`,
+	reading r/g/b columns already written by every write_tracks_to_table() below) --
+	centralizing it here means DebugBB no longer needs to know the format at all, and
+	every script produces one ready-to-render column instead of raw r/g/b for a
+	consumer to reassemble.
+
+	`text` defaults to `"{track_id} {score%}%"` (score as a rounded percentage) when
+	not given -- the standard label body every script uses unless it has something
+	more specific to show. Pass your own `text` for a script-specific override (e.g.
+	onnx_hsemotion.py's `f"{track_id} {emotion_label}"`) while still sharing this same
+	color-prefix logic -- don't duplicate the `{#color(...);}` formatting inline."""
+	r, g, b = track_color(track_id)
+	color_code = f"{{#color({round(r * 255)}, {round(g * 255)}, {round(b * 255)});}}"
+	if text is None:
+		text = f"{track_id} {round(score * 100)}%"
+	return f"{color_code}{text}"
+
+
+# ==================== SHARED table_output COLUMN GROUPS ====================
+# Nearly every onnx_*.py script's write_tracks_to_table() is built from the same three
+# column groups, in the same order, just with different model-specific columns spliced
+# BETWEEN groups (class_id/class_name, mask_area_ratio, handedness, yaw/pitch/roll,
+# keypoints, emotion_label/scores, ...). Splice position varies per script; splitting
+# these into three independent group calls (rather than one big fixed template) lets
+# each script insert its own extra columns wherever makes sense for it, while sharing
+# the actual formatting/computation for the universal parts. table_output's real
+# consumers (this project's shared `DebugBB` component) read columns BY NAME, so
+# there's no requirement that every script's full column order matches another's --
+# only that `label` sits right after `track_id` by convention (readability when
+# glancing at a row), which these three groups produce automatically as long as
+# label_header()/label_row() come first.
+
+def label_header():
+	"""['track_id', 'label'] -- always the first columns of table_output, so 'label'
+	(this track's color-prefixed display text, see build_label()) reads immediately
+	next to the id it belongs to regardless of whatever script-specific columns a
+	particular script inserts after it."""
+	return ['track_id', 'label']
+
+
+def label_row(track_id, score, label_text=None):
+	"""Row values matching label_header(). `label_text` is passed straight through to
+	build_label()'s `text` param -- leave it None for the default "{track_id} {score%}%"
+	label, or pass your own override (e.g. HSEmotion's `f"{track_id} {emotion_label}"`)."""
+	return [track_id, build_label(track_id, score, text=label_text)]
+
+
+def box_header():
+	"""The standard tracked-box columns every onnx_*.py script writes: score, box
+	position/size, box-center velocity, and track age. Matches box_row()'s order."""
+	return ['score', 'cx', 'cy', 'w', 'h', 'x_left', 'x_right', 'y_top', 'y_bottom',
+		'vx', 'vy', 'lost_frames', 'total_frames']
+
+
+def box_row(obj):
+	"""Row values matching box_header(). `obj` is one of this script's own
+	tracked_objects dicts -- needs score/cx/cy/w/h/x_left/x_right/y_top/y_bottom/vx/vy/
+	lost_frames/total_frames keys, which every onnx_*.py script's postprocess() already
+	produces (same field names throughout the project)."""
+	return [
+		f"{obj['score']:.3f}",
+		f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
+		f"{obj['w']:.4f}", f"{obj['h']:.4f}",
+		f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
+		f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
+		f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
+		obj['lost_frames'], obj['total_frames'],
+	]
+
+
+def color_header():
+	"""['r', 'g', 'b'] -- matches color_row()'s order."""
+	return ['r', 'g', 'b']
+
+
+def color_row(track_id):
+	"""Row values matching color_header(): this track's deterministic color (see
+	track_color()), formatted the same way every script's write_tracks_to_table()
+	already did inline."""
+	r, g, b = track_color(track_id)
+	return [f"{r:.4f}", f"{g:.4f}", f"{b:.4f}"]
+
+
+# SHARED table_joints / table_bones SCHEMA -- every keypoint-producing tracker (YuNet,
+# YOLO26 Pose, MediaPipe Face, MediaPipe/OpenCV Hands) writes its flat per-point and
+# per-bone Table DATs through these, so a single Debug COMP template can be wired to
+# any of them identically. 'name' identifies a joint (e.g. 'nose', 'left_wrist') so a
+# multi-track flat table stays unambiguous even when some joints are hidden and break
+# positional ordering. Models without a real per-point/per-bone confidence (YuNet,
+# MediaPipe Face's dense mesh, OpenCV Hands' landmarks) pass a stand-in (1.0, or the
+# track's own detection score) rather than omitting the column.
+
+def joints_header():
+	return ['track_id', 'name', 'x', 'y', 'z', 'conf', 'r', 'g', 'b']
+
+
+def joints_row(track_id, name, x, y, z, conf):
+	r, g, b = track_color(track_id)
+	return [
+		track_id, name,
+		f"{x:.5f}", f"{y:.5f}", f"{z:.5f}", f"{conf:.4f}",
+		f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+	]
+
+
+def bones_header():
+	return ['track_id', 'bx', 'by', 'bangle', 'blen', 'conf', 'r', 'g', 'b']
+
+
+def bones_row(track_id, bx, by, bangle, blen, conf):
+	r, g, b = track_color(track_id)
+	return [
+		track_id,
+		f"{bx:.5f}", f"{by:.5f}", f"{bangle:.4f}", f"{blen:.5f}", f"{conf:.4f}",
+		f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+	]

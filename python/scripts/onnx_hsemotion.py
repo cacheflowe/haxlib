@@ -89,7 +89,7 @@ TRACKER_MIN_HITS = 3
 # 1 = frozen) -- see class docstring for why emotion scores are smoothed the same way.
 OUTPUT_SMOOTHING = 0.5
 
-DRAW_BOXES = True
+DRAW_BOXES = False
 
 # How often (in frames) to actually re-run the emotion classifier, as a GLOBAL cadence
 # shared by every currently-tracked face (not per-track) -- both because a single shared
@@ -308,11 +308,20 @@ class HSEmotionInference(ONNXInferenceManager):
 		self.printONNX(f"  Active providers: {self._emotion_session.get_providers()}")
 
 	def preprocess(self, nA):
-		"""Preprocess for the SCRFD face detector. Assumes TD has already resized input
-		to this network's working resolution upstream (fit_square_sm, 'fill' stretch --
-		same convention as every other detector in this project, NOT the reference's own
-		letterbox/pad-to-square resize; boxes decode in and map back from this same
-		stretched space, exactly like onnx_rfdetr_seg.py's identical 'fill' handling)."""
+		"""Preprocess for the SCRFD face detector. UNLIKE every fixed-square-input
+		detector elsewhere in this project (BlazeFace/BlazePalm/YOLO26 -- all trained on
+		a fixed square resize, where squishing to square upstream via fit_square_sm's
+		'fill' stretch is the CORRECT choice since it matches training-time preprocessing),
+		SCRFD's own ONNX graph declares a fully dynamic input shape (confirmed live:
+		['?', 3, '?', '?']) -- a fully-convolutional FPN detector with no fixed-size
+		layer forcing a specific resolution, conventionally trained on WIDER FACE images
+		at their native aspect ratios rather than force-squished to square. Squishing to
+		square here would feed it MORE distorted, out-of-distribution faces than
+		preserving the source aspect ratio, not less -- so this network intentionally
+		resizes upstream WITHOUT forcing a square shape (whatever fit/resolution TOP is
+		wired above this script), and both preprocess() and the per-stride anchor decode
+		below already work in genuinely separate self.original_h/self.original_w terms
+		(no square assumption anywhere) to support that."""
 		self.original_h, self.original_w = nA.shape[:2]
 		num_channels = nA.shape[2] if len(nA.shape) == 3 else 1
 
@@ -499,8 +508,18 @@ class HSEmotionInference(ONNXInferenceManager):
 		# Prune box/emotion state for tracks the tracker has dropped entirely.
 		object_tracker.prune_stale(active_ids, self._box_state, self._emotion_state)
 
-		draw_debug = self._par_or_default('Drawdebug', DRAW_BOXES)
-		output_img = self.npu.flip_v(self.draw_tracked_faces(draw_labels=draw_debug))
+		if DRAW_BOXES:
+			output_img = self.npu.flip_v(self.draw_tracked_faces())
+		else:
+			# Black frame -- no need to allocate/draw/flip/color-convert every frame when
+			# the overlay is off, just reuse a static cached buffer (same pattern as the
+			# no-detector-output-yet branch above, and every other onnx_*.py script's
+			# Drawdebug handling).
+			needed_shape = (self.original_h or 640, self.original_w or 640, 3)
+			if self._output_buf is None or self._output_buf_shape != needed_shape:
+				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
+				self._output_buf_shape = needed_shape
+			output_img = self._output_buf
 		self.pending_table_update = True
 		return output_img
 
@@ -566,35 +585,35 @@ class HSEmotionInference(ONNXInferenceManager):
 			results[orig_i] = softmax[out_i].astype(np.float32)
 		return results
 
-	def draw_tracked_faces(self, draw_labels=True):
+	def draw_tracked_faces(self):
 		"""Render a debug view at the detector's native working resolution -- box
-		outlines + track id + dominant emotion label. Unlike the seg-family scripts,
-		there's no dense mask to fall back on here, so this IS the visual product, not an
-		optional overlay (see Drawdebug par help)."""
+		outlines + track id + dominant emotion label. Optional overlay gated entirely
+		behind the Drawdebug par at the postprocess() call site (skipped, not just drawn
+		empty, when off -- see that call site's comment); this method itself always
+		draws when called."""
 		proto_h, proto_w = self.original_h or 640, self.original_w or 640
 		draw_img = np.zeros((proto_h, proto_w, 3), dtype=np.uint8)
 
 		def to_px(td_x, td_y):
 			return object_tracker.td_to_px(td_x, td_y, proto_w, proto_h)
 
-		if draw_labels:
-			for obj in self.tracked_objects:
-				if obj['lost_frames'] > 0 and obj['score'] < self.conf_threshold * 0.5:
-					continue
+		for obj in self.tracked_objects:
+			if obj['lost_frames'] > 0 and obj['score'] < self.conf_threshold * 0.5:
+				continue
 
-				px1, py_bottom = to_px(obj['x_left'], obj['y_bottom'])
-				px2, py_top = to_px(obj['x_right'], obj['y_top'])
+			px1, py_bottom = to_px(obj['x_left'], obj['y_bottom'])
+			px2, py_top = to_px(obj['x_right'], obj['y_top'])
 
-				color_f = _track_color(obj['track_id'])
-				color_bgr = (int(color_f[2] * 255), int(color_f[1] * 255), int(color_f[0] * 255))
-				if obj['lost_frames'] > 0:
-					fade = object_tracker.track_fade(obj['lost_frames'], self.tracker.track_buffer)
-					color_bgr = tuple(int(c * fade) for c in color_bgr)
+			color_f = _track_color(obj['track_id'])
+			color_bgr = (int(color_f[2] * 255), int(color_f[1] * 255), int(color_f[0] * 255))
+			if obj['lost_frames'] > 0:
+				fade = object_tracker.track_fade(obj['lost_frames'], self.tracker.track_buffer)
+				color_bgr = tuple(int(c * fade) for c in color_bgr)
 
-				cv2.rectangle(draw_img, (px1, py_top), (px2, py_bottom), color_bgr, 2)
-				label = f"#{obj['track_id']} {obj['emotion_label']}"
-				cv2.putText(draw_img, label, (px1, max(py_top - 6, 12)),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 1, cv2.LINE_AA)
+			cv2.rectangle(draw_img, (px1, py_top), (px2, py_bottom), color_bgr, 2)
+			label = f"#{obj['track_id']} {obj['emotion_label']}"
+			cv2.putText(draw_img, label, (px1, max(py_top - 6, 12)),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 1, cv2.LINE_AA)
 
 		return cv2.cvtColor(draw_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
 
@@ -618,34 +637,40 @@ class HSEmotionInference(ONNXInferenceManager):
 			return
 
 		tbl.clear()
-		header = ['track_id', 'score', 'cx', 'cy', 'w', 'h',
-			'x_left', 'x_right', 'y_top', 'y_bottom', 'vx', 'vy',
-			'lost_frames', 'total_frames', 'emotion_label']
+		header = [
+			*object_tracker.label_header(),
+			*object_tracker.box_header(),
+			'emotion_label',
+		]
 		header += [f'emotion_{name.lower()}' for name in EMOTION_CLASSES]
-		header += ['r', 'g', 'b']
+		header += object_tracker.color_header()
 		tbl.appendRow(header)
 		for obj in self.tracked_objects:
 			scores = obj['emotion_scores']
 			score_strs = [f"{s:.4f}" for s in scores] if scores is not None else [''] * len(EMOTION_CLASSES)
-			r, g, b = _track_color(obj['track_id'])
+			# Override: this track's emotion label instead of the default score%.
 			row = [
-				obj['track_id'], f"{obj['score']:.3f}",
-				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
-				f"{obj['w']:.4f}", f"{obj['h']:.4f}",
-				f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
-				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
-				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
-				obj['lost_frames'], obj['total_frames'],
+				*object_tracker.label_row(
+					obj['track_id'], obj['score'],
+					label_text=f"{obj['track_id']} {obj['emotion_label']}",
+				),
+				*object_tracker.box_row(obj),
 				obj['emotion_label'],
 			]
 			row += score_strs
-			row += [f"{r:.4f}", f"{g:.4f}", f"{b:.4f}"]
+			row += object_tracker.color_row(obj['track_id'])
 			tbl.appendRow(row)
 
 
-# Create global instance
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = HSEmotionInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):
@@ -658,6 +683,12 @@ def onPulse(par):
 
 def onCook(scriptOp):
 	inference_manager.onCook(scriptOp)
+
+	# Same module-level Drawdebug pattern as onnx_yolo26_pose.py/onnx_yolo26_obj_det.py/
+	# onnx_yolo26_seg.py -- read on main thread here rather than via self._par_or_default()
+	# inside postprocess().
+	global DRAW_BOXES
+	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
 	if inference_manager.pending_table_update:
 		inference_manager.pending_table_update = False

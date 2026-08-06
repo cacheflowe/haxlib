@@ -158,6 +158,44 @@ def _ensure_perf_par(base_comp):
 		p[0].readOnly = True
 
 
+# ========== Previous-instance tracking for clean script-reload shutdown ==========
+# Every onnx_*.py script's "Create global instance" section needs to find and
+# shutdown() its OWN previous manager instance before replacing it (see
+# ONNXInferenceManager.shutdown()'s docstring for why -- this is what stops a script
+# reload from leaking a GPU-resident session forever). A plain module-level global
+# doesn't survive a Callbacks DAT text reassignment (confirmed live: the re-executed
+# module gets a genuinely fresh globals() namespace).
+#
+# Do NOT use TD's own COMP-level store()/fetch() for this, even though it's designed
+# to survive exactly this kind of script recompilation -- it was tried first and
+# caused a real, live-confirmed problem: TD's Storage mechanism is meant for data that
+# gets serialized/persisted with the .toe project file, and a live manager instance
+# holds fundamentally unpicklable resources (a threading.Thread, a threading.Lock, a
+# GPU-resident ort.InferenceSession). Storing it live risked TD attempting to persist
+# that object on save, which is the leading suspect behind an actual TD crash
+# encountered while developing this fix, followed by a continuous model-reload loop
+# after restart. This module-level dict is the safe replacement: it's a plain Python
+# object living in a regular imported module (never serialized with the project,
+# unlike a COMP's Storage), keyed by each script's own parent COMP path so multiple
+# concurrent scripts don't collide. It's cleared only if this module itself is
+# reloaded (a deliberate, rare action via /reload or a TD restart) -- at that point
+# any previously-registered instances become one-time orphans again, same as before
+# this whole mechanism existed, not a new problem.
+_manager_registry = {}
+
+
+def shutdown_and_register(comp_path, new_manager):
+	"""Call from each onnx_*.py script's "Create global instance" section, AFTER
+	constructing the new manager instance: shuts down whatever was previously
+	registered for this exact comp_path (if anything), then registers the new one.
+	See the _manager_registry comment above for why this exists instead of a plain
+	global or TD's own Storage."""
+	prev = _manager_registry.get(comp_path)
+	if prev is not None:
+		prev.shutdown()
+	_manager_registry[comp_path] = new_manager
+
+
 class ONNXInferenceManager:
 	"""Base class for managing ONNX model loading and threaded inference in TouchDesigner."""
 	
@@ -456,17 +494,54 @@ class ONNXInferenceManager:
 		instance's lifetime. Lazy (not started in __init__) so a manager that never
 		actually runs inference (e.g. failed model load) never pays for a thread at all.
 
-		Known tradeoff: if this script's callbacks DAT gets live-edited/resynced while TD
-		is running, the module re-executes and a NEW manager instance (with its own new
-		worker thread) is created; the OLD instance's worker thread has no shutdown hook
-		tied to that reload and is left blocked forever on an empty queue.get() (near-zero
-		CPU cost, daemon=True so it dies with the TD process either way) -- an accepted
-		minor leak on manual script edits, not something that compounds during normal use.
-		"""
-		if self._worker_thread is not None:
+		Also restarts the worker if the previous thread died/was shut down (see
+		shutdown()) -- checking is_alive(), not just is None, so a manager instance that
+		outlives its own worker thread (e.g. after an explicit shutdown()) can still
+		resume inference rather than silently never processing work again.
+
+		CORRECTION to an earlier version of this comment, which called the tradeoff
+		below "an accepted minor leak... not something that compounds during normal
+		use" -- that was wrong, confirmed live: every script reload during active
+		development (editing an onnx_*.py file and pushing it into a live Callbacks DAT)
+		creates a NEW manager instance with its own new worker thread, and the OLD
+		instance's worker thread has no shutdown hook tied to that reload -- it blocks
+		forever on an empty queue.get(). A blocked-but-alive thread's own stack frame
+		holds a live reference to `self` (the bound method it was started with), which
+		keeps the ENTIRE old manager instance reachable and un-garbage-collectable --
+		including its loaded ort.InferenceSession(s) and all the GPU/CUDA memory they
+		hold. This is NOT near-zero cost: confirmed live with 20+ accumulated reloads
+		across a single dev session, GPU memory usage climbed to 96% (15.7/16.4 GB) and
+		utilization pegged at 100%, requiring a full TD restart. See shutdown() and every
+		onnx_*.py script's "Create global instance" section, which now calls it on the
+		previous instance before constructing a new one specifically to prevent this."""
+		if self._worker_thread is not None and self._worker_thread.is_alive():
 			return
 		self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
 		self._worker_thread.start()
+
+	def shutdown(self):
+		"""Cleanly release this manager's GPU-resident ONNX Runtime session(s) and stop
+		its background worker thread -- call this on the OLD manager instance right
+		before a script reload replaces it with a new one (see every onnx_*.py script's
+		"Create global instance" section), instead of leaking both. See
+		_ensure_worker_started()'s docstring for the full mechanism this prevents.
+
+		Sends _worker_loop() its already-implemented (but, before this fix, never
+		actually used) shutdown sentinel so the thread's `while True` loop actually
+		returns instead of blocking forever -- that's what lets Python's refcounting
+		actually collect this instance once nothing else references it. Also proactively
+		clears any ort.InferenceSession-typed attribute (self.session, plus any
+		subclass-specific extra session like a landmark/emotion model) via introspection
+		rather than requiring each subclass to override this -- so a new subclass with
+		its own extra session doesn't silently need to remember to add cleanup here too."""
+		if self._worker_thread is not None and self._worker_thread.is_alive():
+			try:
+				self._work_queue.put_nowait(None)
+			except queue.Full:
+				pass  # a real inference is mid-flight; the thread exits on its NEXT get() instead
+		for name, val in list(vars(self).items()):
+			if isinstance(val, ort.InferenceSession):
+				setattr(self, name, None)
 
 	def _worker_loop(self):
 		"""Persistent background worker -- replaces the old pattern of spawning a brand

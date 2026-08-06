@@ -568,28 +568,30 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 			return
 
 		tbl.clear()
-		tbl.appendRow(['track_id', 'class_id', 'class_name', 'score',
-					'cx', 'cy', 'w', 'h',
-					'x_left', 'x_right', 'y_top', 'y_bottom',
-					'vx', 'vy', 'lost_frames', 'total_frames', 'r', 'g', 'b'])
+		tbl.appendRow([
+			*object_tracker.label_header(),
+			'class_id', 'class_name',
+			*object_tracker.box_header(),
+			*object_tracker.color_header(),
+		])
 		for obj in self.tracked_objects:
-			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
-				obj['track_id'], obj['class_id'], obj['class_name'],
-				f"{obj['score']:.3f}",
-				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
-				f"{obj['w']:.4f}", f"{obj['h']:.4f}",
-				f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
-				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
-				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
-				obj['lost_frames'], obj['total_frames'],
-				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+				*object_tracker.label_row(obj['track_id'], obj['score']),
+				obj['class_id'], obj['class_name'],
+				*object_tracker.box_row(obj),
+				*object_tracker.color_row(obj['track_id']),
 			])
 
 
-# Create global instance
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = YOLO26ObjectDetectionInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):

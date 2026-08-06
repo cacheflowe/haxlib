@@ -227,6 +227,46 @@ empirically-bracketed constant happen to agree, prefer keeping the relationship 
 expression (reacting to whatever the true independent variable is) rather than baking in the
 coincidentally-matching number, even if the number "looks right" in front of you right now.
 
+## Bug 6: YuNet needed Bug 3's isotropic box-size fix too, despite NOT having BlazeFace/SCRFD's architectural excuse
+
+**Symptom:** reported live on a portrait (1080x1920) input: YuNet's `table_output` bounding box
+looked vertically stretched, while HSEmotion (a separate face detector on the same project, same
+`fit_square_sm`-into-a-square preprocessing pipeline) looked correct on the same input. Both
+detectors decode boxes the same structural way -- independent `x1,y1,x2,y2` (or `x,y,w,h`)
+regression, normalized against the square buffer's own dims, no forced-equal-anchor architecture
+like BlazeFace/BlazePalm. Since neither detector has Bug 3's specific "architecturally isotropic"
+excuse, it looked at first like Bug 3's fix (never ported to `onnx_yunet.py`) shouldn't be needed.
+
+**Root cause, confirmed by direct pixel-size calculation, not guessing:** on a real live detection,
+`table_output` showed `w=0.1845`, `h=0.2059` (square-space fractions, ratio 0.896 -- nearly
+square). Reprojected independently against `true_w=1080`/`true_h=1920` (`w*true_w`, `h*true_h`):
+`199px x 395px`, a `0.50` width/height ratio -- far more elongated than a real face's ~0.75-0.9.
+The near-square *fraction* ratio (0.896) was itself the tell: even without an architectural
+constraint, YuNet's own regression, shown a severely anisotropically-squished portrait face (the
+`fit='fill'` square buffer compresses height ~1.8x more than width for a 9:16 input), empirically
+produces a close-to-square box in square-space -- and reprojecting a close-to-square fraction pair
+independently against a true frame whose axes differ by ~1.8x inherits nearly that entire ratio as
+apparent elongation, regardless of the real face's shape. HSEmotion's SCRFD-style anchor-distance
+regression apparently doesn't exhibit this same near-square tendency under the same squish (or does
+so less severely) -- a genuine per-model behavioral difference, not a shared coordinate bug.
+
+**Fix:** applied the exact same isotropic-size formula as Bug 3/4 (`iso_w = w_frac / sqrt(true_aspect)`,
+`iso_h = h_frac * sqrt(true_aspect)`, `true_aspect = true_w/true_h`) to `onnx_yunet.py`'s
+`postprocess()`, computing `true_w`/`true_h` from the sibling `null_passthrough` TOP the same way
+`onnx_mediapipe_face.py` already does. Only `w`/`h` are corrected -- `cx`/`cy` (and the corner
+columns `x_left`/`x_right`/`y_top`/`y_bottom`, which don't feed the Debug COMP's box render at all)
+are left as plain position fractions, since Bug 2's position-fraction-preservation argument holds
+regardless of any given detector's box-size behavior. Confirmed live: reprojected box went from
+`199x395px` (0.50 ratio) to `259x284px` (0.91 ratio) on the same portrait input, with zero errors.
+
+**Takeaway:** Bug 3's "architecturally isotropic" framing was true for BlazeFace/BlazePalm
+specifically, but the isotropic-size correction is really a fix for *any* detector whose square-
+space box-size output happens to be roughly isotropic under a severe input-aspect squish -- which
+can happen empirically even without a forced-equal-anchor architecture. "This detector's box
+regression is independent, so it doesn't need Bug 3's fix" is not a safe inference; check the raw
+square-space `w`/`h` fraction ratio directly (near 1.0 is the tell) before ruling it out, especially
+under an aspect as extreme as portrait video.
+
 ## Combined takeaway
 
 All three fixes were independently necessary — reverting any one of them (camera `sy` back to

@@ -12,7 +12,6 @@ import object_tracker
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 ByteTracker = object_tracker.ByteTracker
 _nms = object_tracker.nms
-_track_color = object_tracker.track_color
 
 # ==================== MODEL OUTPUT FORMAT ====================
 # yolo26n-pose.onnx is an Ultralytics end2end (NMS-free) export.
@@ -533,25 +532,19 @@ class YOLO26PoseInference(ONNXInferenceManager):
 			kpt_header += [f'{name}_x', f'{name}_y', f'{name}_conf']
 
 		tbl.clear()
-		tbl.appendRow(['track_id', 'score',
-					'cx', 'cy', 'w', 'h',
-					'x_left', 'x_right', 'y_top', 'y_bottom',
-					*kpt_header,
-					'vx', 'vy', 'lost_frames', 'total_frames', 'r', 'g', 'b'])
+		tbl.appendRow([
+			*object_tracker.label_header(),
+			*object_tracker.box_header(),
+			*kpt_header,
+			*object_tracker.color_header(),
+		])
 		for obj in self.tracked_objects:
 			flat_kpts = [v for kp in obj['keypoints'] for v in kp]  # 17*3 flat list
-			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
-				obj['track_id'],
-				f"{obj['score']:.3f}",
-				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
-				f"{obj['w']:.4f}", f"{obj['h']:.4f}",
-				f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
-				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
+				*object_tracker.label_row(obj['track_id'], obj['score']),
+				*object_tracker.box_row(obj),
 				*[f"{v:.4f}" for v in flat_kpts],
-				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
-				obj['lost_frames'], obj['total_frames'],
-				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+				*object_tracker.color_row(obj['track_id']),
 			])
 
 	def write_joints_bones_to_tables(self):
@@ -568,17 +561,19 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		if self.opJointsTableDAT is not None:
 			tbl = self.opJointsTableDAT
 			tbl.clear()
-			tbl.appendRow(['jx', 'jy', 'jconf'])
+			tbl.appendRow(object_tracker.joints_header())
 			for obj in self.tracked_objects:
-				for kp, vis in zip(obj['keypoints'], obj['keypoints_visible']):
+				track_id = obj['track_id']
+				for name, kp, vis in zip(KEYPOINT_NAMES, obj['keypoints'], obj['keypoints_visible']):
 					if vis:
-						tbl.appendRow([f"{kp[0]:.4f}", f"{kp[1]:.4f}", f"{kp[2]:.4f}"])
+						tbl.appendRow(object_tracker.joints_row(track_id, name, kp[0], kp[1], 0.0, kp[2]))
 
 		if self.opBonesTableDAT is not None:
 			tbl = self.opBonesTableDAT
 			tbl.clear()
-			tbl.appendRow(['bx', 'by', 'bangle', 'blen', 'bconf'])
+			tbl.appendRow(object_tracker.bones_header())
 			for obj in self.tracked_objects:
+				track_id = obj['track_id']
 				kpts = obj['keypoints']
 				vis = obj['keypoints_visible']
 				for a, b in SKELETON_EDGES:
@@ -592,12 +587,18 @@ class YOLO26PoseInference(ONNXInferenceManager):
 						angle = math.degrees(math.atan2(dy, dx))
 						length = math.hypot(dx, dy)
 						conf = min(aconf, bconf2)
-						tbl.appendRow([f"{mx:.4f}", f"{my:.4f}", f"{angle:.4f}", f"{length:.4f}", f"{conf:.4f}"])
+						tbl.appendRow(object_tracker.bones_row(track_id, mx, my, angle, length, conf))
 
 
-# Create global instance
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = YOLO26PoseInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):

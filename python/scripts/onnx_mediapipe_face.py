@@ -80,7 +80,7 @@ TRACKER_MAX_AGE = 30
 TRACKER_IOU_THRESHOLD = 0.3
 TRACKER_MIN_HITS = 3
 OUTPUT_SMOOTHING = 0.5
-DRAW_BOXES = True
+DRAW_BOXES = False
 
 
 def _sigmoid(x):
@@ -311,7 +311,7 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 	def __init__(self):
 		super().__init__()
 		self.opOutputTableDAT = parent().op('table_output')
-		self.opLandmarksTableDAT = parent().op('table_landmarks')
+		self.opJointsTableDAT = parent().op('table_joints')
 		self.conf_threshold = CONF_THRESHOLD
 		self.low_conf_threshold = LOW_CONF_THRESHOLD
 		self.tracker = ByteTracker(
@@ -786,8 +786,19 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		active_ids = {t.track_id for t in active_tracks}
 		object_tracker.prune_stale(active_ids, self._box_state, self._landmark_state, self._pose_state)
 
-		draw_debug = self._par_or_default('Drawdebug', DRAW_BOXES)
-		output_img = self.npu.flip_v(self.draw_tracked_faces(draw_labels=draw_debug))
+		if DRAW_BOXES:
+			output_img = self.npu.flip_v(self.draw_tracked_faces())
+		else:
+			# Black frame -- no need to allocate/draw/flip/color-convert every frame when
+			# the overlay is off, just reuse a static cached buffer (same pattern as the
+			# no-detector-output-yet branch above, and every other onnx_*.py script's
+			# Drawdebug handling). The REAL landmark visualization is the Debug COMP's geo
+			# instancing driven by table_landmarks, unaffected by this toggle either way.
+			needed_shape = (self.original_h or 256, self.original_w or 256, 3)
+			if self._output_buf is None or self._output_buf_shape != needed_shape:
+				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
+				self._output_buf_shape = needed_shape
+			output_img = self._output_buf
 		self.pending_table_update = True
 		return output_img
 
@@ -930,36 +941,36 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 
 		return results
 
-	def draw_tracked_faces(self, draw_labels=True):
+	def draw_tracked_faces(self):
 		"""Lightweight debug view at the detector's native working resolution -- box
 		outlines + track id + landmark points. The main landmark visualization is the
 		Debug COMP's geo instancing driven by table_landmarks, not this (see Drawdebug
-		par help)."""
+		par help). Gated entirely behind DRAW_BOXES at the postprocess() call site
+		(skipped, not just drawn empty, when off); this method itself always draws."""
 		proto_h, proto_w = self.original_h or 256, self.original_w or 256
 		draw_img = np.zeros((proto_h, proto_w, 3), dtype=np.uint8)
 
 		def to_px(td_x, td_y):
 			return object_tracker.td_to_px(td_x, td_y, proto_w, proto_h)
 
-		if draw_labels:
-			for obj in self.tracked_objects:
-				if obj['lost_frames'] > 0 and obj['score'] < self.conf_threshold * 0.5:
-					continue
-				px1, py_bottom = to_px(obj['x_left'], obj['y_bottom'])
-				px2, py_top = to_px(obj['x_right'], obj['y_top'])
-				color_f = _track_color(obj['track_id'])
-				color_bgr = (int(color_f[2]*255), int(color_f[1]*255), int(color_f[0]*255))
-				if obj['lost_frames'] > 0:
-					fade = object_tracker.track_fade(obj['lost_frames'], self.tracker.track_buffer)
-					color_bgr = tuple(int(c * fade) for c in color_bgr)
-				cv2.rectangle(draw_img, (px1, py_top), (px2, py_bottom), color_bgr, 2)
-				cv2.putText(draw_img, f"#{obj['track_id']} yaw={obj['yaw']:+.0f}deg", (px1, max(py_top - 6, 12)),
-					cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 1, cv2.LINE_AA)
-				if obj['landmarks'] is not None:
-					for lx, ly, _ in obj['landmarks']:
-						px, py = to_px(lx, ly)
-						if 0 <= px < proto_w and 0 <= py < proto_h:
-							draw_img[py, px] = color_bgr
+		for obj in self.tracked_objects:
+			if obj['lost_frames'] > 0 and obj['score'] < self.conf_threshold * 0.5:
+				continue
+			px1, py_bottom = to_px(obj['x_left'], obj['y_bottom'])
+			px2, py_top = to_px(obj['x_right'], obj['y_top'])
+			color_f = _track_color(obj['track_id'])
+			color_bgr = (int(color_f[2]*255), int(color_f[1]*255), int(color_f[0]*255))
+			if obj['lost_frames'] > 0:
+				fade = object_tracker.track_fade(obj['lost_frames'], self.tracker.track_buffer)
+				color_bgr = tuple(int(c * fade) for c in color_bgr)
+			cv2.rectangle(draw_img, (px1, py_top), (px2, py_bottom), color_bgr, 2)
+			cv2.putText(draw_img, f"#{obj['track_id']} yaw={obj['yaw']:+.0f}deg", (px1, max(py_top - 6, 12)),
+				cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_bgr, 1, cv2.LINE_AA)
+			if obj['landmarks'] is not None:
+				for lx, ly, _ in obj['landmarks']:
+					px, py = to_px(lx, ly)
+					if 0 <= px < proto_w and 0 <= py < proto_h:
+						draw_img[py, px] = color_bgr
 
 		return cv2.cvtColor(draw_img, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
 
@@ -983,44 +994,49 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		# -- see _compute_head_direction_geometric()/_compute_head_direction_solvepnp()'s
 		# docstrings. yaw = left/right turn, pitch = nod, roll = tilt (a genuine angle
 		# either way). Same data-output scheme as onnx_yunet.py's own table_output.
-		tbl.appendRow(['track_id', 'score', 'cx', 'cy', 'w', 'h',
-			'x_left', 'x_right', 'y_top', 'y_bottom', 'vx', 'vy',
-			'lost_frames', 'total_frames', 'yaw', 'pitch', 'roll', 'r', 'g', 'b'])
+		tbl.appendRow([
+			*object_tracker.label_header(),
+			*object_tracker.box_header(),
+			'yaw', 'pitch', 'roll',
+			*object_tracker.color_header(),
+		])
 		for obj in self.tracked_objects:
-			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
-				obj['track_id'], f"{obj['score']:.3f}",
-				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
-				f"{obj['w']:.4f}", f"{obj['h']:.4f}",
-				f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
-				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
-				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
-				obj['lost_frames'], obj['total_frames'],
+				*object_tracker.label_row(obj['track_id'], obj['score']),
+				*object_tracker.box_row(obj),
 				f"{obj['yaw']:.4f}", f"{obj['pitch']:.4f}", f"{obj['roll']:.4f}",
-				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+				*object_tracker.color_row(obj['track_id']),
 			])
 
 	def write_landmarks_to_table(self):
 		"""Flat per-visible-landmark Table DAT, one row per landmark across ALL tracked
-		faces -- same convention as onnx_yolo26_pose.py's table_joints (no fixed per-
-		face/per-landmark slot layout, so there's no cap on how many faces get instanced
-		at once downstream)."""
-		tbl = self.opLandmarksTableDAT
+		faces -- shared table_joints schema, see object_tracker.joints_header()'s
+		docstring (no fixed per-face/per-landmark slot layout, so there's no cap on how
+		many faces get instanced at once downstream). The 468-point mesh has no named
+		joints or per-point confidence, so 'name' is the point's own index and 'conf' is
+		a constant 1.0 stand-in."""
+		tbl = self.opJointsTableDAT
 		if tbl is None:
 			return
 		tbl.clear()
-		tbl.appendRow(['track_id', 'lx', 'ly', 'lz'])
+		tbl.appendRow(object_tracker.joints_header())
 		for obj in self.tracked_objects:
 			if obj['landmarks'] is None:
 				continue
 			track_id = obj['track_id']
-			for lx, ly, lz in obj['landmarks']:
-				tbl.appendRow([track_id, f"{lx:.5f}", f"{ly:.5f}", f"{lz:.5f}"])
+			for idx, (lx, ly, lz) in enumerate(obj['landmarks']):
+				tbl.appendRow(object_tracker.joints_row(track_id, str(idx), lx, ly, lz, 1.0))
 
 
-# Create global instance
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = MediaPipeFaceInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):
@@ -1033,6 +1049,12 @@ def onPulse(par):
 
 def onCook(scriptOp):
 	inference_manager.onCook(scriptOp)
+
+	# Same module-level Drawdebug pattern as onnx_yolo26_pose.py/onnx_yolo26_obj_det.py/
+	# onnx_yolo26_seg.py -- read on main thread here rather than via self._par_or_default()
+	# inside postprocess().
+	global DRAW_BOXES
+	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
 	if inference_manager.pending_table_update:
 		inference_manager.pending_table_update = False

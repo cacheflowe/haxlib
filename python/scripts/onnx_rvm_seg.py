@@ -361,9 +361,15 @@ class RVMMattingInference(ONNXInferenceManager):
 		return self.npu.flip_v(self._output_buf)
 
 
-# Create global instance
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = RVMMattingInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):

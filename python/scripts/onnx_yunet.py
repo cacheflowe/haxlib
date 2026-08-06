@@ -12,7 +12,6 @@ import object_tracker
 # Import the base inference manager
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 ByteTracker = object_tracker.ByteTracker
-_track_color = object_tracker.track_color
 
 # ==================== CONFIGURATION ====================
 # YuNet's own facial keypoints (fixed by the model, not configurable): right eye, left
@@ -336,6 +335,7 @@ class YuNetInference(ONNXInferenceManager):
 	def __init__(self):
 		super().__init__()
 		self.opOutputTableDAT = parent().op('table_output')  # Optional Table DAT for structured output
+		self.opJointsTableDAT = parent().op('table_joints')
 		self.conf_threshold = CONF_THRESHOLD  # Will be overridden by custom par
 		self.low_conf_threshold = LOW_CONF_THRESHOLD
 		self.tracker = ByteTracker(
@@ -653,6 +653,22 @@ class YuNetInference(ONNXInferenceManager):
 
 		# Build structured data for CHOP/table output (filter out decayed/unconfirmed tracks)
 		active_ids = {t.track_id for t in active_tracks}
+
+		# Isotropic box-size correction -- see docs/learnings/debug-comp-camera-aspect.md's
+		# "Bug 3". YuNet's own box regression, like BlazeFace/SCRFD's, comes out of the
+		# anisotropically-squished square input (fit_square_sm's 'fill' mode) roughly
+		# isotropic in practice under a severe (e.g. portrait) input aspect -- naively
+		# reprojecting its square-space w/h fractions independently against true_w/true_h
+		# produces a box whose aspect always drifts toward the true frame's own aspect
+		# instead of the real face's shape (confirmed live: vertically stretched boxes on
+		# a portrait input, correct on landscape). Re-expressing the size as a fraction of
+        # each axis's own true dimension, rather than reprojecting independently, fixes
+		# this the same way it was fixed for the mediapipe/hands landmark detectors.
+		null_passthrough = self.scriptOp.parent().op('null_passthrough')
+		true_w = null_passthrough.width if null_passthrough is not None else self.original_w
+		true_h = null_passthrough.height if null_passthrough is not None else self.original_h
+		true_aspect = true_w / true_h
+
 		self.tracked_objects = []
 		for t in active_tracks:
 			# t.confirmed gates display, same reasoning as the score check just below --
@@ -703,8 +719,8 @@ class YuNetInference(ONNXInferenceManager):
 
 			cx = (smoothed[0] + smoothed[2]) / 2
 			cy = (smoothed[1] + smoothed[3]) / 2
-			w_ = smoothed[2] - smoothed[0]
-			h_ = smoothed[3] - smoothed[1]
+			w_ = (smoothed[2] - smoothed[0]) / math.sqrt(true_aspect)
+			h_ = (smoothed[3] - smoothed[1]) * math.sqrt(true_aspect)
 			self.tracked_objects.append({
 				'track_id': t.track_id,
 				'score': t.score,
@@ -816,33 +832,49 @@ class YuNetInference(ONNXInferenceManager):
 		# -- see _compute_head_direction_geometric()/_compute_head_direction_solvepnp()'s
 		# docstrings. yaw = left/right turn, pitch = nod, roll = tilt (a genuine angle
 		# either way).
-		tbl.appendRow(['track_id', 'score',
-					'cx', 'cy', 'w', 'h',
-					'x_left', 'x_right', 'y_top', 'y_bottom',
-					'vx', 'vy', 'lost_frames', 'total_frames',
-					'yaw', 'pitch', 'roll',
-					*kpt_header, 'r', 'g', 'b'])
+		tbl.appendRow([
+			*object_tracker.label_header(),
+			*object_tracker.box_header(),
+			'yaw', 'pitch', 'roll',
+			*kpt_header,
+			*object_tracker.color_header(),
+		])
 		for obj in self.tracked_objects:
 			flat_kpts = [v for kp in obj['keypoints'] for v in kp]  # 5*2 flat list
-			r, g, b = _track_color(obj['track_id'])
 			tbl.appendRow([
-				obj['track_id'],
-				f"{obj['score']:.3f}",
-				f"{obj['cx']:.4f}", f"{obj['cy']:.4f}",
-				f"{obj['w']:.4f}", f"{obj['h']:.4f}",
-				f"{obj['x_left']:.4f}", f"{obj['x_right']:.4f}",
-				f"{obj['y_top']:.4f}", f"{obj['y_bottom']:.4f}",
-				f"{obj['vx']:.4f}", f"{obj['vy']:.4f}",
-				obj['lost_frames'], obj['total_frames'],
+				*object_tracker.label_row(obj['track_id'], obj['score']),
+				*object_tracker.box_row(obj),
 				f"{obj['yaw']:.4f}", f"{obj['pitch']:.4f}", f"{obj['roll']:.4f}",
 				*[f"{v:.4f}" for v in flat_kpts],
-				f"{r:.4f}", f"{g:.4f}", f"{b:.4f}",
+				*object_tracker.color_row(obj['track_id']),
 			])
 
+	def write_joints_to_table(self):
+		"""Flat per-keypoint Table DAT, one row per keypoint across ALL tracked faces --
+		shared table_joints schema, see object_tracker.joints_header()'s docstring. YuNet's
+		5 keypoints are 2D-only (no z) and have no per-point confidence, so both are
+		constant stand-ins (0.0 / 1.0). No table_bones -- these 5 points (eyes/nose/mouth)
+		don't form a natural skeleton the way pose/hand joints do."""
+		tbl = self.opJointsTableDAT
+		if tbl is None:
+			return
+		tbl.clear()
+		tbl.appendRow(object_tracker.joints_header())
+		for obj in self.tracked_objects:
+			track_id = obj['track_id']
+			for name, (kx, ky) in zip(KEYPOINT_NAMES, obj['keypoints']):
+				tbl.appendRow(object_tracker.joints_row(track_id, name, kx, ky, 0.0, 1.0))
 
-# Create global instance
+
+# Create global instance -- shut down any PREVIOUS instance first (releases its
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
+# reload during active development doesn't leak both -- see
+# onnx_inference_manager.shutdown_and_register()'s docstring for the full
+# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
+# a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = YuNetInference()
 inference_manager.opPerformance = op('constant_performance')
+onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):
@@ -865,6 +897,7 @@ def onCook(scriptOp):
 	if inference_manager.pending_table_update:
 		inference_manager.pending_table_update = False
 		inference_manager.write_tracks_to_table()
+		inference_manager.write_joints_to_table()
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
