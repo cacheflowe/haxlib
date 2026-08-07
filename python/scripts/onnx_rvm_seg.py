@@ -3,7 +3,6 @@ import numpy as np
 import onnxruntime as ort
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 
@@ -179,7 +178,7 @@ class RVMMattingInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for inp in inputs:
 			self.printONNX(f"  input name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 		# The base class (_load_model_thread) calls on_model_loaded(session) BEFORE it
 		# assigns self.session = session -- so self.session is still None here.

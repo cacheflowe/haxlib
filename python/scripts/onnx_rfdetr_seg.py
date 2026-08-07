@@ -3,7 +3,6 @@ import numpy as np
 import cv2
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -181,7 +180,6 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 		self._masks_idx = 2
 		# Structured tracking data exposed for CHOP/table consumption
 		self.tracked_objects = []
-		self.pending_table_update = False
 		# Pre-allocated buffers (lazily sized)
 		self._output_buf = None
 		self._output_buf_shape = None
@@ -307,7 +305,7 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for i, inp in enumerate(inputs):
 			self.printONNX(f"  input[{i}] name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 		boxes_idx = logits_idx = masks_idx = None
 		for i, o in enumerate(outputs):
@@ -373,7 +371,6 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 			if self._output_buf is None or self._output_buf_shape != needed_shape:
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
-			self.pending_table_update = True
 			return self.npu.flip_v(self._output_buf)
 
 		boxes_raw = outputs[self._boxes_idx][0]    # (100, 4) cxcywh, normalized 0-1
@@ -507,8 +504,15 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 		object_tracker.prune_stale(active_ids, self._box_state, self._mask_state)
 
 		output_img = self.npu.flip_v(self.draw_tracked_masks(draw_labels=DRAW_BOXES))
-		self.pending_table_update = True
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output from tracked_objects right after this frame's texture
+		publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring. Gated by Outputtrackdata,
+		same reasoning as onnx_yolo26_seg.py's identical method."""
+		if self._par_or_default('Outputtrackdata', OUTPUT_TRACK_DATA):
+			self.write_tracks_to_table()
 
 	def draw_tracked_masks(self, draw_labels=False):
 		"""Render a soft-edged white silhouette matte for currently (this-frame) detected
@@ -619,10 +623,8 @@ def onCook(scriptOp):
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		if inference_manager._par_or_default('Outputtrackdata', OUTPUT_TRACK_DATA):
-			inference_manager.write_tracks_to_table()
+	# Table writes happen inside inference_manager.onCook(scriptOp) above now, via
+	# on_result_published() (still gated by Outputtrackdata internally).
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

@@ -3,7 +3,6 @@ import numpy as np
 import cv2
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -168,7 +167,6 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 		# Structured tracking data exposed for CHOP consumption
 		# Each entry: {track_id, class_id, class_name, score, cx, cy, w, h, x_left, x_right, y_top, y_bottom, vx, vy, lost_frames, total_frames}
 		self.tracked_objects = []
-		self.pending_table_update = False  # Flag for main-thread table flush
 		# Pre-allocated buffers (lazily sized)
 		self._output_buf = None
 		self._output_buf_shape = None
@@ -277,7 +275,7 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 			self.printONNX(f"  input[{i}] name='{inp.name}' shape={inp.shape} type={inp.type}")
 
 		# Log active execution providers (critical for performance diagnosis)
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 		# Auto-detect output format
 		if len(outputs) == 2:
@@ -494,10 +492,13 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 				self._output_buf_shape = needed_shape
 			output_img = self._output_buf
 
-		# Flag that we have new tracking data to flush on main thread
-		self.pending_table_update = True
-
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output from tracked_objects right after this frame's texture
+		publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring."""
+		self.write_tracks_to_table()
 
 	def draw_tracked_boxes(self):
 		"""Render bounding boxes for tracked objects onto a blank image.
@@ -603,17 +604,15 @@ def onPulse(par):
 
 
 def onCook(scriptOp):
-	# Run base manager cook (handles model loading, inference dispatch, copyNumpyArray)
+	# Run base manager cook (handles model loading, inference dispatch, copyNumpyArray).
+	# Table writes happen inside this call now, via on_result_published() -- called
+	# right after this frame's texture publishes, before the next frame's capture gets
+	# dispatched.
 	inference_manager.onCook(scriptOp)
 
 	# Optionally draw boxes on main thread to avoid threading issues with OpenCV (if enabled)
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
-
-	# Flush tracking data to Table DAT on main thread (safe for TD operator access)
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		inference_manager.write_tracks_to_table()
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

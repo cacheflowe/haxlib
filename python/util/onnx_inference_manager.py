@@ -32,8 +32,115 @@ import math
 import td
 
 # Import util modules (will be available in TouchDesigner context)
-import onnx_util  # Custom utilities for ONNX logging and details
 import numpy_util as npu  # numpy utilities
+
+# ========== ONNX logging/provider helpers ==========
+# Folded in from the former onnx_util.py (now a thin re-export shim -- see that file's
+# own comment) since every actual caller of these functions was already going through
+# self.onnx_util.X() (a proxy attribute pointing back at this same module), never a
+# direct module-level onnx_util.X() call -- confirmed by grepping every onnx_*.py script
+# in this project. Every onnx_*.py script now calls these directly: check_providers via
+# the self.check_providers() instance method below, providers()/log_onnx_options()/
+# log_model_details() as plain module-level functions (see _load_model_thread() and any
+# script that loads its own secondary session, e.g. onnx_hsemotion.py's emotion
+# classifier). The only genuinely indirect caller left is the legacy
+# tox/haxlib/ml/onnx/MovenetONNX.py, which looks 'onnx_util' up via TD's DAT-based mod()
+# mechanism (not a plain Python import) and is intentionally NOT modernized to this
+# pattern -- it predates ONNXInferenceManager entirely and is kept as a frozen
+# comparison baseline, not a live consumer of this base class.
+
+def printONNX(*args):
+	print("[ONNX]", *args)
+
+def log_onnx_options():
+	printONNX('version', ort.__version__)
+
+def providers(gpu_mem_limit_bytes=None):
+	"""CUDA (falling back to CPU) execution provider list, with explicit CUDA EP options.
+
+	NOTE: this previously also set arena_extend_strategy='kSameAsRequested' on the theory
+	that a fixed per-frame input shape wouldn't need ORT's default doubling-growth
+	arena. Measured live against rf-detr-seg-nano.onnx, that setting was a real
+	regression (effective fps dropped from 80s to mid-50s, and the project's
+	frame-delay compensator needed MORE frames, not fewer) -- 'kSameAsRequested' controls
+	how the arena EXTENDS when it needs more memory than it currently has cached, and if
+	the model's actual internal allocation pattern isn't byte-identical every call, it
+	forces the arena to re-extend (a real, synchronizing cudaMalloc) far more often than
+	the default 'kNextPowerOfTwo', which rounds generously so it rarely needs to re-extend
+	at all. Reverted -- don't re-add without measuring the isolated effect first.
+
+	gpu_mem_limit_bytes: optional cap on how far the CUDA EP's arena is allowed to grow.
+	Left unset (ORT's own default, effectively unlimited) unless a caller has a specific
+	reason to reserve VRAM headroom -- e.g. for TD's own rendering pipeline, which shares
+	the same physical GPU as inference and isn't otherwise coordinated with it.
+
+	If a future caller ever batches a variable number of items into one session.run()
+	call (e.g. per-detection secondary classification across N tracked instances), be
+	aware the CUDA EP caches cuDNN's convolution-algorithm selection PER EXACT INPUT
+	SHAPE -- confirmed live (onnx_hsemotion.py) that a varying batch dimension means
+	almost every call hits a brand-new shape and re-pays a multi-second one-time search,
+	turning a batching "optimization" into a severe regression. Pad to a fixed ceiling
+	batch size instead of using the real (varying) count -- see
+	.ai/skills/td-threaded-inference-optimization.md's "Round 5" for the full story and
+	timing numbers.
+
+	`cudnn_conv_algo_search: 'HEURISTIC'` -- confirmed live via onnxruntime's own
+	`enable_profiling` trace (see docs/learnings/mediapipe-landmarks.md) that even with a
+	genuinely CONSTANT input shape every call, individual depthwise Conv nodes
+	periodically took ~200ms EACH (vs. microseconds normally) -- ~9 of them summing to a
+	~2-SECOND total stall that froze the whole TD app, recurring every 15-90+ seconds with
+	no obvious trigger. This is the default 'EXHAUSTIVE' algorithm search's cache being
+	evicted/re-triggered periodically, not a one-time per-shape cost -- plausibly from
+	cache pressure when multiple sessions/models (e.g. a detector + a separate landmark
+	model, as in every onnx_mediapipe_*.py script) share the same process-wide cuDNN
+	algorithm cache. 'HEURISTIC' picks a fast, good-enough algorithm via cuDNN's built-in
+	heuristics instead of an actual timed benchmark-and-cache search, eliminating this
+	class of stall entirely -- there is no longer a cache to evict, so there's nothing to
+	periodically re-pay. Confirmed via the same profiling trace: no individual Conv node
+	exceeded a few ms after this was set. Applies globally (every caller of this shared
+	providers() function), not just the script that first surfaced the symptom.
+	"""
+	cuda_options = {
+		'device_id': 0,
+		'cudnn_conv_algo_search': 'HEURISTIC',
+	}
+	if gpu_mem_limit_bytes is not None:
+		cuda_options['gpu_mem_limit'] = gpu_mem_limit_bytes
+	return [('CUDAExecutionProvider', cuda_options), 'CPUExecutionProvider'] # 'TensorrtExecutionProvider'
+
+def log_model_details(session):
+	printONNX('Session providers:', session.get_providers())
+	printONNX('Inputs: -----------------')
+	for i in session.get_inputs():
+		printONNX('-', i.name, i.shape, i.type)
+	printONNX("Outputs: ----------------")
+	for o in session.get_outputs():
+		printONNX('-', o.name, o.shape, o.type)
+	printONNX("Input shape: ------------")
+	input_shape = session.get_inputs()[0].shape
+	has_dynamic_dims = any(isinstance(dim, str) for dim in input_shape)
+	if has_dynamic_dims:
+		# Use default size for MoveNet multipose (256x256)
+		height, width = 256, 256
+		printONNX(f"Model input shape is dynamic! Using default size: {height}x{width}")
+	else:
+		# Use the model's expected dimensions if they're specified
+		batch_size, channels, height, width = input_shape
+		printONNX(f"Model expects input shape: {input_shape}")
+
+def check_providers(printfn, session):
+	"""Log active execution providers and warn if running CPU-only (no CUDA EP) -- the
+	standard tail every on_model_loaded() override across this project's ONNX scripts
+	repeated verbatim (model-specific I/O-shape logging/sanity-checks stay in each
+	script's own on_model_loaded(), only this generic tail is shared). `printfn` is
+	normally the caller's own self.printONNX (keeps the '[ONNX]' log prefix consistent).
+	Returns the active provider list in case a caller wants it."""
+	active = session.get_providers()
+	printfn(f"Active providers: {active}")
+	if 'CUDAExecutionProvider' not in active:
+		printfn("WARNING: Running on CPU only! CUDA provider not available.")
+		printfn("  Install onnxruntime-gpu or check CUDA/cuDNN compatibility.")
+	return active
 
 # ========== Cyclic GC tax mitigation ==========
 # Confirmed live (a /run-script diagnostic wrapping run_inference() and recording per-call
@@ -64,7 +171,7 @@ import numpy_util as npu  # numpy utilities
 # next lever to reach for, rather than re-enabling automatic collection.
 if gc.isenabled():
 	gc.disable()
-	onnx_util.printONNX('Disabled cyclic garbage collection to avoid periodic multi-second '
+	printONNX('Disabled cyclic garbage collection to avoid periodic multi-second '
 		'TD freezes during real-time inference (see onnx_inference_manager.py comment).')
 
 # ========== Shared Performance Logging Functions ==========
@@ -267,12 +374,20 @@ class ONNXInferenceManager:
 		self._dats_resolved = False
 		
 		# Utils
-		self.onnx_util = onnx_util
 		self.npu = npu
 	
 	def printONNX(self, *args):
 		"""Logging helper for ONNX operations."""
 		print("[ONNX]", *args)
+
+	def check_providers(self, session):
+		"""Log active execution providers and warn if running CPU-only -- call this from
+		on_model_loaded() as `self.check_providers(session)`. Thin wrapper around the
+		module-level check_providers() that supplies self.printONNX automatically, so
+		every subclass calls a real instance method instead of reaching through a
+		self.onnx_util proxy attribute for a module that's since been folded into this
+		one (see the "ONNX logging/provider helpers" section near the top of this file)."""
+		return check_providers(self.printONNX, session)
 
 	def _par_or_default(self, name, default):
 		"""Read a live custom par by name if it exists on scriptOp, else fall back to the
@@ -419,7 +534,24 @@ class ONNXInferenceManager:
 		Override to perform additional setup.
 		"""
 		pass
-	
+
+	def on_result_published(self):
+		"""Called from onCook(), on the main thread, immediately after this frame's
+		texture has been published via copyNumpyArray() -- and BEFORE the fall-through
+		capture/dispatch of the NEXT frame (see onCook()'s "ORDERING NOTE" comment).
+
+		Override to flush any side-channel outputs (Table DATs, CHOP channels, etc.)
+		built from self.tracked_objects/whatever postprocess() just set, INSTEAD OF the
+		older pending_table_update-flag-checked-by-the-wrapper-after-onCook-returns
+		pattern most existing onnx_*.py scripts still use. Doing it here rather than
+		after onCook() returns publishes those outputs one step earlier in the same
+		cook -- before this frame's next capture is dispatched, not after -- which is
+		both a cleaner mental model and closer to how tox/haxlib/ml/onnx/MovenetONNX.py's
+		OutputSkeletonsToChop() ran (immediately after consuming a result, same call).
+		Safe to do real TD operator access here: this only ever runs on the main thread,
+		same as postprocess() itself, never the worker thread."""
+		pass
+
 	# ========== Model Loading ==========
 	
 	def loadONNX(self, scriptOp):
@@ -452,23 +584,19 @@ class ONNXInferenceManager:
 			sess_options = self.get_session_options()
 			
 			# Log ONNX environment
-			if self.onnx_util:
-				self.onnx_util.log_onnx_options()
-				providers = self.onnx_util.providers()
-			else:
-				providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
-			
+			log_onnx_options()
+			providers_list = providers()
+
 			# Load model
 			if sess_options:
-				temp_session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers)
+				temp_session = ort.InferenceSession(model_path, sess_options=sess_options, providers=providers_list)
 			else:
-				temp_session = ort.InferenceSession(model_path, providers=providers)
-			
+				temp_session = ort.InferenceSession(model_path, providers=providers_list)
+
 			self.printONNX('ONNX Device activated:', ort.get_device())
 			self.printONNX('### session props -----------------------------------')
-			
-			if self.onnx_util:
-				self.onnx_util.log_model_details(temp_session)
+
+			log_model_details(temp_session)
 			
 			# Call subclass hook
 			self.on_model_loaded(temp_session)
@@ -680,7 +808,21 @@ class ONNXInferenceManager:
 				except:
 					pass  # Performance constants not available
 				
-				# Postprocess on main thread (safe for TD operator access)
+				# Postprocess on main thread (safe for TD operator access). For every
+				# tracker script in this project, THIS call is where the frame's real
+				# payload is actually finalized: postprocess() sets self.tracked_objects
+				# as a side effect, on top of returning output_img. Everything published
+				# to TD below -- this TOP's pixels via copyNumpyArray() a few lines down,
+				# AND whatever Table DATs/CHOP channels a subclass flushes from
+				# self.tracked_objects, whether via on_result_published() (below) or the
+				# older pending_table_update-flag-checked-by-the-wrapper-after-onCook-
+				# returns pattern most existing onnx_*.py scripts still use -- comes from
+				# this exact same call's result. They can never disagree with each other
+				# on WHICH detection cycle they represent, only on how many CPU
+				# instructions of this same cook happen to separate one publish from the
+				# other (see the capture/dispatch fall-through comment below for the one
+				# real ordering quirk that follows from the OLDER pattern -- on_result_
+				# published() exists specifically to avoid it).
 				t0 = time.perf_counter()
 				output_img = self.postprocess(raw_outputs)
 				self.last_postprocess_ms = (time.perf_counter() - t0) * 1000
@@ -689,7 +831,13 @@ class ONNXInferenceManager:
 				if output_img.dtype != np.float32:
 					output_img = output_img.astype(np.float32)
 
-				scriptOp.copyNumpyArray(output_img)
+				scriptOp.copyNumpyArray(output_img)  # publish THIS frame's texture now
+
+				# Give subclasses a chance to flush side-channel outputs (Table DATs,
+				# etc.) built from the SAME postprocess() result, RIGHT NOW -- before the
+				# next frame's capture/dispatch below, not after. See on_result_published()'s
+				# own docstring for why this exists and the ordering it avoids.
+				self.on_result_published()
 
 				# See _ensure_perf_par()'s docstring -- this measures ONLY this script's
 				# own capture->output latency, not whatever a network's cache/cacheselect
@@ -703,9 +851,36 @@ class ONNXInferenceManager:
 				# Record performance sample (once per second) -- see _record_perf_sample()
 				self._frame_count += 1
 				self._record_perf_sample()
-				
-				return  # Early return after outputting result
-		
+
+				# Deliberately NOT returning here -- fall through to the capture/dispatch
+				# code below so a fresh frame gets captured and submitted to the worker
+				# in this SAME cook, immediately after consuming this result. This is
+				# exactly what this method's own docstring already claims ("inspired by
+				# MoveNet pattern") but an earlier version of this code didn't actually
+				# do: an unconditional `return` here meant the next capture always had
+				# to wait for a whole SEPARATE cook cycle, injecting one extra frame of
+				# latency into every single inference cycle regardless of model or
+				# queue/lock design. Confirmed live by comparing against
+				# tox/haxlib/ml/onnx/MovenetONNX.py's old runInferenceThreaded(), which
+				# consumes a completed result and dispatches the next capture in the
+				# same call -- exactly the behavior restored here. is_inferencing is
+				# reliably already False by the time execution reaches the check just
+				# below: the worker thread (_worker_loop) sets pending_result and then
+				# is_inferencing=False sequentially, on the same thread, with no
+				# intervening I/O, before this lock is ever released.
+				#
+				# ORDERING NOTE for subclasses using the OLDER pending_table_update-flag
+				# pattern instead of on_result_published() above: that flag only gets
+				# checked by the subclass's own onCook wrapper AFTER this whole method
+				# returns -- so for those scripts, the real publish order is (1) this
+				# frame's TOP texture via copyNumpyArray() above, (2) the NEXT frame's
+				# capture + worker-thread dispatch below (unrelated data, just CPU time
+				# spent before returning), (3) this frame's Table DAT writes, back in the
+				# subclass's wrapper. Not a data-consistency bug -- (1) and (3) are still
+				# built from the exact same postprocess() call's tracked_objects -- just a
+				# non-obvious CPU-time ordering. on_result_published() runs BEFORE this
+				# fall-through instead, avoiding it entirely for any script that uses it.
+
 		# If inference is still running, skip this frame (natural frame skipping via threading)
 		if self.is_inferencing:
 			self.frames_skipped += 1

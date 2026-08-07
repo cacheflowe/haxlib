@@ -10,8 +10,7 @@ import object_tracker
 
 # Import the base inference manager
 ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
-ByteTracker = object_tracker.ByteTracker
-_nms = object_tracker.nms
+KeypointTracker = object_tracker.KeypointTracker
 
 # ==================== MODEL OUTPUT FORMAT ====================
 # yolo26n-pose.onnx is an Ultralytics end2end (NMS-free) export.
@@ -42,25 +41,26 @@ SKELETON_EDGES = [
 	(11, 13), (13, 15), (12, 14), (14, 16),  # legs
 ]
 
+# Keypoint indices used for KeypointTracker's matching distance -- the STABLE core
+# (face, shoulders, hips), excluding elbows/wrists/knees/ankles, which move the most
+# frame-to-frame and carry the most jitter. See onnx_movenet.py's identical constant
+# for the full rationale (that script's KeypointTracker port is the reference).
+_UNSTABLE_KEYPOINT_KEYWORDS = ('elbow', 'wrist', 'knee', 'ankle')
+DISTANCE_KEYPOINT_INDICES = [
+	i for i, name in enumerate(KEYPOINT_NAMES)
+	if not any(kw in name for kw in _UNSTABLE_KEYPOINT_KEYWORDS)
+]
+
 # ==================== CONFIGURATION ====================
 # Only one pose variant is currently exported: 'yolo26n-pose'
 MODEL_VARIANT = 'yolo26s-pose'
 
-# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). Used as
-# BOTH ByteTracker's high and low confidence bounds (see ByteTracker's own docstring for
-# the two-stage design) -- collapsed to one value here because this scene's real signal
-# and background noise sit at the same very-low absolute confidence, so there's no
-# reliable "real but degraded" band to carve out between two separate thresholds. A
-# non-empty low band was actively admitting noise into the recovery pass, which could
-# then win a match against a genuinely-tracked person mid-Kalman-prediction and briefly
-# overwrite it with garbage -- confirmed live as the source of extra flicker versus
-# collapsing to one threshold. This still runs the rest of ByteTrack's machinery
-# (Kalman motion prediction, optimal Hungarian assignment, track lifecycle) -- it's
-# equivalent to SORT rather than a no-op. A future model/scene with a real confidence
-# gap between degraded-but-real and background noise could reintroduce a genuine low
-# threshold below this one; ByteTracker itself still supports it either way.
-# Value tuned live for this camera/scene, where real-signal confidence runs extremely
-# low (fractions of a percent) -- not a typical detector threshold.
+# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). Value
+# tuned live for this camera/scene, where real-signal confidence runs extremely low
+# (fractions of a percent) -- not a typical detector threshold. Previously also used as
+# ByteTracker's two-stage high/low recovery bounds (collapsed to one value there, see
+# git history) -- KeypointTracker (see below) has no such two-stage concept at all, so
+# this is now a plain single admission/display gate.
 CONF_THRESHOLD = 0.005
 
 # Tracker: max frames to keep a lost track alive. Tuned live: ~0.25s of grace at 60fps.
@@ -75,21 +75,19 @@ TRACKER_MAX_AGE = 15
 # brief occlusion (that's Tracklossframes' job, not this one).
 TRACKER_MIN_HITS = 3
 
-# Tracker: min IoU to accept a match between a track and a detection. Tuned live --
-# see the extensive tradeoff notes on Trackiouthreshold in onSetupParameters: too low
-# risks a new person's detection getting absorbed into an unrelated existing track, too
-# high breaks continuous matching and causes constant track-ID respawning (duplicates).
-TRACKER_IOU_THRESHOLD = 0.36
+# Tracker: max summed keypoint distance (object_tracker.KeypointTracker, restricted to
+# DISTANCE_KEYPOINT_INDICES above) to accept a match between a track and a detection --
+# NOT a box IoU threshold. Switched from ByteTracker (box-IoU + Kalman) to KeypointTracker
+# (keypoint-distance) after onnx_movenet.py's port of the same switch showed materially
+# more stable tracking on that model -- see td-threaded-inference-optimization.md and
+# object_tracker.py's "POSE-SPECIFIC TRACKER" section for the full rationale. Starting
+# value carried over from onnx_movenet.py's own tuning; re-tune live against this scene.
+MAX_MATCH_DIST = 0.5
 
-# NMS IoU threshold applied to raw per-frame detections before tracking. This model's
-# "end2end" one-to-one-trained export reduces duplicate detections for the same person
-# but doesn't perfectly eliminate them, especially further down the confidence tail --
-# lowering Confthreshold surfaces near-duplicate boxes for the same person. ByteTracker's
-# matching is strictly 1:1 per frame, so a near-duplicate that doesn't win the match
-# against the real track becomes a brand-new phantom track instead of just being dropped.
-# Tuned live to a fairly aggressive (low) value for this scene -- see the Nmsiouthreshold
-# comment for the tradeoff against delaying a new nearby person's first appearance.
-NMS_IOU_THRESHOLD = 0.11
+# Fraction of MAX_MATCH_DIST used as the duplicate-detection suppression threshold --
+# see KeypointTracker.update()'s docstring for why this needs to be tighter than the
+# match threshold itself.
+DUP_DIST_FACTOR = 0.5
 
 # Minimum box width/height (normalized 0-1, fraction of frame dimension) for a detection
 # to be kept at all -- applied alongside Confthreshold, before NMS/tracking. A tiny,
@@ -105,11 +103,12 @@ NMS_IOU_THRESHOLD = 0.11
 MIN_BOX_WIDTH = 0.02
 MIN_BOX_HEIGHT = 0.02
 
-# Smoothing factor for position/keypoint lerp -- used for both the debug draw and
-# the output table (0 = no smoothing, 1 = frozen). Only applies to keypoints; box
-# position/motion is handled by ByteTracker's own Kalman filter. Tuned live -- lower
-# than a naive guess, since heavier smoothing was fighting the Kalman filter's own
-# motion estimate rather than complementing it.
+# Smoothing factor for keypoint AND box position lerp -- used for both the debug draw
+# and the output table (0 = no smoothing, 1 = frozen). KeypointTracker holds the box at
+# its last-matched value with no damping of its own (see object_tracker.KeypointTrack's
+# docstring), so this is the ONLY smoothing applied to box position now, unlike the old
+# ByteTracker version where a separate Kalman filter handled box motion. Tuned live for
+# the keypoint case originally -- re-verify it still suits box motion too.
 OUTPUT_SMOOTHING = 0.23
 
 # Draw skeletons on the output image?
@@ -126,21 +125,24 @@ class YOLO26PoseInference(ONNXInferenceManager):
 	"""YOLO26 Pose Estimation inference with temporal tracking.
 
 	Targets the Ultralytics end2end (one-to-one trained) ONNX export: single output
-	tensor (1, 300, 57), pre-sorted by confidence. The one-to-one training objective
-	reduces duplicate detections for the same person but doesn't guarantee zero -- an
-	explicit NMS pass (_nms, applied in postprocess()) still runs before tracking.
+	tensor (1, 300, 57), pre-sorted by confidence, already NMS'd by the graph itself. A
+	SECOND, explicit box-IoU NMS pass here was tried and REMOVED -- see onnx_movenet.py's
+	module docstring for why: it makes a permanent, irreversible detection-loss decision
+	using the box signal, redundant with (and less reliable than) KeypointTracker's own
+	keypoint-distance duplicate suppression below.
 
 	Tracking is split the same way ONNXInferenceManager splits model concerns:
-	`object_tracker.ByteTracker` (shared across every ONNX script in this project) owns
-	the generic box-tracking lifecycle -- Kalman motion prediction, optimal (Hungarian)
-	assignment, and ByteTrack's two-stage high/low-confidence association. This class
-	only owns what's genuinely pose-specific: per-keypoint smoothing and the
-	visibility hysteresis, keyed by track_id in self._kpt_state since keypoints aren't
-	part of the tracker's own Kalman state (only the box is). Keypoint visibility uses
-	the same hold window as track loss (Tracklossframes/track_buffer) rather than its
-	own separate par -- a pose can't sensibly outlive the track it belongs to, so a
-	second, independently-tunable "how long do keypoints survive" knob was pure
-	redundancy once both were confirmed to want the same value.
+	`object_tracker.KeypointTracker` (shared across every keypoint-based ONNX script in
+	this project, see onnx_movenet.py's port for the full rationale on why keypoint-
+	distance matching beats box IoU for pose models) owns the generic tracking lifecycle
+	-- greedy keypoint-distance matching, track lifecycle, confidence decay. This class
+	only owns what's genuinely pose-specific: per-keypoint smoothing and the visibility
+	hysteresis, keyed by track_id in self._kpt_state since KeypointTracker itself doesn't
+	smooth anything (see its docstring). Keypoint visibility uses the same hold window as
+	track loss (Tracklossframes/track_buffer) rather than its own separate par -- a pose
+	can't sensibly outlive the track it belongs to, so a second, independently-tunable
+	"how long do keypoints survive" knob was pure redundancy once both were confirmed to
+	want the same value.
 	"""
 
 	def __init__(self):
@@ -159,16 +161,15 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		self.opJointsTableDAT = parent().op('table_joints')
 		self.opBonesTableDAT = parent().op('table_bones')
 		self.conf_threshold = CONF_THRESHOLD       # Will be overridden by custom par
-		self.tracker = ByteTracker(
-			high_thresh=CONF_THRESHOLD, low_thresh=CONF_THRESHOLD,
-			match_thresh=TRACKER_IOU_THRESHOLD, track_buffer=TRACKER_MAX_AGE,
+		self.tracker = KeypointTracker(
+			max_match_dist=MAX_MATCH_DIST, distance_keypoint_indices=DISTANCE_KEYPOINT_INDICES,
+			dup_dist_factor=DUP_DIST_FACTOR, track_buffer=TRACKER_MAX_AGE,
 			min_hits=TRACKER_MIN_HITS,
 		)
 		# Per-track keypoint smoothing/hysteresis state, keyed by track_id (see class docstring).
 		self._kpt_state = {}
 		# Structured tracking data exposed for CHOP/table consumption
 		self.tracked_objects = []
-		self.pending_table_update = False  # Flag for main-thread table flush
 		# Pre-allocated buffers (lazily sized)
 		self._output_buf = None
 		self._output_buf_shape = None
@@ -185,9 +186,9 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		p[0].max = 0.05  # real signal in this scene lives near ~0.005 -- 0-1 made the slider unusably coarse
 		p[0].clampMin = True
 		p[0].clampMax = False  # still typeable above 0.05 for a future scene with normal-range confidences
-		p[0].help = ("Minimum detection confidence to track/show a person at all (also ByteTracker's "
-			"high-confidence match threshold -- see object_tracker.py). Also used as the low-confidence "
-			"recovery threshold here (collapsed to one value; see CONF_THRESHOLD comment for why).")
+		p[0].help = ("Minimum detection confidence for a person to be admitted to the tracker at all, "
+			"and to stay displayed once tracked (KeypointTracker has no ByteTrack-style two-stage "
+			"high/low recovery band -- ages out purely via Track Loss Frames/score decay instead).")
 		scriptOp.par.Confthreshold = CONF_THRESHOLD
 		p = page.appendFloat('Outputsmoothing', label='Output Smoothing', size=1)
 		p[0].default = OUTPUT_SMOOTHING
@@ -205,14 +206,14 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		p[0].clampMax = False
 		p[0].help = object_tracker.par_help('Tracklossframes')
 		scriptOp.par.Tracklossframes = TRACKER_MAX_AGE
-		p = page.appendFloat('Trackiouthreshold', label='Track IoU Threshold', size=1)
-		p[0].default = TRACKER_IOU_THRESHOLD
+		p = page.appendFloat('Maxmatchdist', label='Max Match Distance', size=1)
+		p[0].default = MAX_MATCH_DIST
 		p[0].min = 0.0
-		p[0].max = 1.0
+		p[0].max = 2.0  # summed across several stable keypoints -- can meaningfully exceed 1.0
 		p[0].clampMin = True
-		p[0].clampMax = True
-		p[0].help = object_tracker.par_help('Trackiouthreshold', subject='person')
-		scriptOp.par.Trackiouthreshold = TRACKER_IOU_THRESHOLD
+		p[0].clampMax = False
+		p[0].help = object_tracker.par_help('Maxmatchdist', subject='person')
+		scriptOp.par.Maxmatchdist = MAX_MATCH_DIST
 		p = page.appendFloat('Trackconfirmframes', label='Track Confirm Frames', size=1)
 		p[0].default = TRACKER_MIN_HITS
 		p[0].min = 1.0
@@ -221,14 +222,6 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		p[0].clampMax = False
 		p[0].help = object_tracker.par_help('Trackconfirmframes', subject='person')
 		scriptOp.par.Trackconfirmframes = TRACKER_MIN_HITS
-		p = page.appendFloat('Nmsiouthreshold', label='NMS IoU Threshold (Dedup)', size=1)
-		p[0].default = NMS_IOU_THRESHOLD
-		p[0].min = 0.0
-		p[0].max = 1.0
-		p[0].clampMin = True
-		p[0].clampMax = True
-		p[0].help = object_tracker.par_help('Nmsiouthreshold', subject='person', subject_plural='people')
-		scriptOp.par.Nmsiouthreshold = NMS_IOU_THRESHOLD
 		p = page.appendFloat('Minboxwidth', label='Min Box Width', size=1)
 		p[0].default = MIN_BOX_WIDTH
 		p[0].min = 0.0
@@ -271,7 +264,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 			self.printONNX(f"WARNING: expected last output dim {expected_width} (box+conf+cls+{NUM_KEYPOINTS}kpts), got {shape}")
 
 		# Log active execution providers (critical for performance diagnosis)
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 	def preprocess(self, nA):
 		"""Preprocess input for the pose model.
@@ -315,14 +308,9 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		# Read thresholds/smoothing from custom parameters (updated each frame)
 		self.conf_threshold = self._par_or_default('Confthreshold', CONF_THRESHOLD)
 		smoothing = self._par_or_default('Outputsmoothing', OUTPUT_SMOOTHING)
-		# high_thresh == low_thresh: collapses ByteTracker's two-stage recovery to a
-		# single threshold (see CONF_THRESHOLD comment for why, in this scene).
-		self.tracker.high_thresh = self.conf_threshold
-		self.tracker.low_thresh = self.conf_threshold
-		self.tracker.match_thresh = self._par_or_default('Trackiouthreshold', TRACKER_IOU_THRESHOLD)
+		self.tracker.max_match_dist = self._par_or_default('Maxmatchdist', MAX_MATCH_DIST)
 		self.tracker.track_buffer = self._par_or_default('Tracklossframes', TRACKER_MAX_AGE)
 		self.tracker.min_hits = int(self._par_or_default('Trackconfirmframes', TRACKER_MIN_HITS))
-		nms_iou_threshold = self._par_or_default('Nmsiouthreshold', NMS_IOU_THRESHOLD)
 		min_box_width = self._par_or_default('Minboxwidth', MIN_BOX_WIDTH)
 		min_box_height = self._par_or_default('Minboxheight', MIN_BOX_HEIGHT)
 
@@ -341,17 +329,14 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		boxes_xyxy[:, 1], boxes_xyxy[:, 3] = 1.0 - boxes_xyxy[:, 3], 1.0 - boxes_xyxy[:, 1]
 		keypoints[:, :, 1] = 1.0 - keypoints[:, :, 1]
 
-		# Collapse near-duplicate detections for the same person before they ever reach
-		# the tracker -- see NMS_IOU_THRESHOLD comment. Without this, lowering
-		# Confthreshold surfaces duplicate boxes that spawn phantom tracks.
-		if len(boxes_xyxy) > 0:
-			keep = _nms(boxes_xyxy, confidences, nms_iou_threshold)
-			boxes_xyxy = boxes_xyxy[keep]
-			confidences = confidences[keep]
-			keypoints = keypoints[keep]
+		# No box-IoU NMS here -- see class docstring / onnx_movenet.py's module docstring
+		# for why it was tried and removed. This model's own end2end export already NMS's
+		# itself; any residual duplicates for the same person are handled downstream by
+		# KeypointTracker's own keypoint-distance duplicate suppression instead.
 
-		# Build detection list for the tracker. No detection-count cap here: the
-		# tracker itself (ByteTracker.max_detections) is what bounds worst-case cost.
+		# Build detection list for the tracker. No detection-count cap here: KeypointTracker's
+		# max_tracks bounds worst-case track-count growth, and its greedy distance-sort
+		# matching is far cheaper than ByteTracker's Hungarian assignment was at this scale.
 		detections = []
 		for i in range(len(boxes_xyxy)):
 			detections.append({
@@ -364,7 +349,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		active_tracks = self.tracker.update(detections)
 
 		# Build structured data for CHOP/table output (filter out decayed tracks).
-		# active_ids covers every track ByteTracker is still maintaining, not just the
+		# active_ids covers every track the tracker is still maintaining, not just the
 		# ones cleared for display below -- a track kept alive via low-confidence
 		# recovery (score hovering just under Confthreshold) is still genuinely "alive"
 		# and must keep its keypoint-smoothing state; scoping active_ids to the
@@ -376,15 +361,16 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		for t in active_tracks:
 			# t.confirmed gates display, same reasoning as the score check just below --
 			# a track still in its min_hits confirmation window is genuinely "alive" (kept
-			# in active_ids, keeps its tracker-side Kalman state) but not yet trusted as a
-			# real object, exactly like a track kept alive only by low-confidence recovery.
+			# in active_ids) but not yet trusted as a real object, exactly like a track
+			# kept alive only by low-confidence recovery.
 			if t.score < self.conf_threshold or not t.confirmed:
 				continue
-			box = t.box
-			cx = (box[0] + box[2]) / 2
-			cy = (box[1] + box[3]) / 2
-			w = box[2] - box[0]
-			h = box[3] - box[1]
+			box_raw = t.box  # last-matched box, held as-is during occlusion -- see
+			# object_tracker.KeypointTrack's docstring for why there's no Kalman filter/
+			# prediction here. UNSMOOTHED on its own: KeypointTracker (unlike
+			# ByteTracker's Kalman filter) applies no damping of its own, so without the
+			# same smoothing lerp applied to keypoints below, the box would jump straight
+			# to each new detection's raw box every matched frame.
 
 			state = self._kpt_state.get(t.track_id)
 			raw_kpts = t.payload.get('keypoints')
@@ -393,11 +379,12 @@ class YOLO26PoseInference(ONNXInferenceManager):
 				state = {
 					'smoothed': [list(kp) for kp in raw_kpts] if raw_kpts else [[0.0, 0.0, 0.0]] * NUM_KEYPOINTS,
 					'lost_frames': [0] * NUM_KEYPOINTS,
+					'box': list(box_raw),
 				}
 				self._kpt_state[t.track_id] = state
 			elif t.lost_frames == 0 and raw_kpts is not None:
 				# Only advance keypoint smoothing on a frame where this track actually
-				# matched a real detection -- a Kalman-predicted-only frame (lost_frames > 0)
+				# matched a real detection -- a frame with no fresh match (lost_frames > 0)
 				# has no new keypoint data at all, so just let the hold counters age below.
 				# No per-keypoint confidence gate: if the box cleared Confthreshold, its
 				# keypoints are used as-is (this model's per-keypoint confidence values run
@@ -412,9 +399,21 @@ class YOLO26PoseInference(ONNXInferenceManager):
 						conf,
 					]
 					state['lost_frames'][k] = 0
+				# Same lerp, same "only advance on a frame that actually matched a real
+				# detection" cadence as the keypoints above.
+				state['box'] = [
+					state['box'][i] * smoothing + box_raw[i] * (1.0 - smoothing)
+					for i in range(4)
+				]
 			if t.lost_frames > 0:
 				for k in range(NUM_KEYPOINTS):
 					state['lost_frames'][k] += 1
+
+			box = state['box']
+			cx = (box[0] + box[2]) / 2
+			cy = (box[1] + box[3]) / 2
+			w = box[2] - box[0]
+			h = box[3] - box[1]
 
 			self.tracked_objects.append({
 				'track_id': t.track_id,
@@ -426,7 +425,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 				'y_bottom': box[1],  # bottom edge of bbox (TD coords)
 				'keypoints': state['smoothed'],  # 17 x [x, y, conf], smoothed, TD coords
 				'keypoints_visible': [lost <= self.tracker.track_buffer for lost in state['lost_frames']],
-				'vx': float(t.mean[4]), 'vy': float(t.mean[5]),  # Kalman-estimated box-center velocity
+				'vx': float(t.mean[4]), 'vy': float(t.mean[5]),  # frame-to-frame box-center delta (see KeypointTrack.mean)
 				'lost_frames': t.lost_frames,
 				'total_frames': t.total_frames,
 			})
@@ -445,10 +444,14 @@ class YOLO26PoseInference(ONNXInferenceManager):
 				self._output_buf_shape = needed_shape
 			output_img = self._output_buf
 
-		# Flag that we have new tracking data to flush on main thread
-		self.pending_table_update = True
-
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output/table_joints/table_bones from tracked_objects right after
+		this frame's texture publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring."""
+		self.write_tracks_to_table()
+		self.write_joints_bones_to_tables()
 
 	def draw_tracked_skeletons(self):
 		"""Render boxes + skeletons for tracked people onto a blank image.
@@ -513,7 +516,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 	#
 	# Each dict contains: track_id, score, cx, cy, w, h, x_left, x_right,
 	#   y_top, y_bottom, keypoints (17 x [x, y, conf], smoothed), keypoints_visible
-	#   (17 x bool, hysteresis-gated), vx, vy (Kalman-estimated), lost_frames, total_frames
+	#   (17 x bool, hysteresis-gated), vx, vy (frame-to-frame box-center delta), lost_frames, total_frames
 	#
 	# For a Table DAT approach, call write_tracks_to_table() from a
 	# Script DAT or Execute DAT each frame.
@@ -616,12 +619,6 @@ def onCook(scriptOp):
 	# Optionally draw skeletons on main thread to avoid threading issues with OpenCV (if enabled)
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
-
-	# Flush tracking data to Table DAT on main thread (safe for TD operator access)
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		inference_manager.write_tracks_to_table()
-		inference_manager.write_joints_bones_to_tables()
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

@@ -2,7 +2,6 @@ import os
 import numpy as np
 
 # custom util imports
-import onnx_util
 import numpy_util as npu
 import onnx_inference_manager
 
@@ -67,7 +66,7 @@ class DepthAnythingInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for inp in inputs:
 			self.printONNX(f"  input name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 	def preprocess(self, nA):
 		"""Preprocess input for Depth Anything V2. Input nA is float32 RGBA 0-1 from

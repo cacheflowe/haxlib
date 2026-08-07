@@ -208,18 +208,10 @@ weighted layer at load) — not a compatibility concern, and not evidence of cus
 
 ## TODO:
 - Current upgrade
-  - WIP: RF-DETR is mid-flight
   - Comp par: Input Aspect Ratio: `op('./in1').width / op('./in1').height`
   - Debug font size: `parent(2).op('in1').height * 0.025`
   - Eval dat for score: `str(round(float(me.inputTable[me.inputRow, 1].val) * 100)) + '%'`
   - Debug cam1 scale: `0.5 * parent(2).par.Inputaspectratio`
-- Build reusable BBDebug tox for bounding box visualization
-  -  Consisten aspect ratio calc - on parent comp?
-  - Standardize on table eval w/extra metadata after ID
-    - Should add color for instances
-  - Also, Bones & Landmarks/Keypoints w/standardized table output
-  - Also, text dat w/spec table to show info
-- Make sure inputs are okay to squeeze into a square for inference
 - Fix up ByteTracker - it doesn't seem great
 - Look into threaded frame sync delay - how can we tighten this up
   - Add frame delay controls for all? can we auto-detect?

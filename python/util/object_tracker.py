@@ -45,6 +45,7 @@ tracker-related custom pars every script here exposes, so the explanations only 
 place instead of being copy-pasted per script.
 """
 
+import math
 import numpy as np
 
 
@@ -485,6 +486,196 @@ class ByteTracker:
 		return unmatched_tracks, unmatched_dets
 
 
+# ==================== POSE-SPECIFIC TRACKER: KEYPOINT DISTANCE ====================
+# Ported from tox/haxlib/ml/onnx/MovenetONNX.py's Skeleton-based slot tracker (see git
+# history for the original), generalized off its fixed 6-slot CHOP-channel design onto
+# this project's unbounded-track_id convention -- table_joints/table_bones already key
+# rows by track_id + keypoint name, so a persistent output SLOT (the old design's reason
+# for existing) isn't needed anymore for output stability.
+#
+# WHY this exists alongside ByteTracker: for a model whose box is DERIVED from keypoint
+# extents rather than independently learned (MoveNet -- see onnx_movenet.py's module
+# docstring), a single flailing limb can swing the box's size/position around by a large
+# fraction frame to frame. ByteTracker's matching is entirely box-IoU-based, so it's
+# directly exposed to that noise. Matching on keypoint position instead -- restricted to
+# a caller-supplied set of STABLE indices (e.g. torso/shoulders/hips/face, excluding
+# elbows/wrists/knees/ankles, which move the most and carry the most per-frame jitter)
+# sidesteps it entirely. Confirmed live against onnx_movenet.py's real output that this
+# is a materially more stable matching signal than box IoU for that model -- ByteTrack's
+# tracks were flickering/respawning in a way the old keypoint-distance tracker never did
+# on the same input, even after tuning confidence thresholds.
+#
+# Deliberately duck-types enough of ByteTracker's Track (track_id, score, box, payload,
+# lost_frames, total_frames, confirmed, mean[4]/mean[5]=vx/vy) that a calling script can
+# swap `self.tracker = ByteTracker(...)` for `self.tracker = KeypointTracker(...)` and
+# nothing else needs to change -- see onnx_movenet.py.
+
+def keypoint_distance(kpts_a, kpts_b, indices):
+	"""Sum of per-axis Euclidean distances between two keypoint sets ([x, y, ...] tuples
+	or lists, extra trailing values like confidence ignored), restricted to `indices` --
+	skipping noisy extremities is the whole point of this metric over box IoU, see the
+	section docstring above."""
+	total = 0.0
+	for i in indices:
+		ax, ay = kpts_a[i][0], kpts_a[i][1]
+		bx, by = kpts_b[i][0], kpts_b[i][1]
+		total += math.hypot(ax - bx, ay - by)
+	return total
+
+
+class KeypointTrack:
+	"""One tracked object for KeypointTracker. No Kalman filter/motion model -- keypoint-
+	distance matching doesn't need position prediction the way box-IoU matching does
+	(there's no box to predict the reappearance location of); box/keypoints are simply
+	held at their last-matched value during occlusion, same as the old script's Skeleton
+	object. `mean` exists purely so calling code reading `t.mean[4]`/`t.mean[5]` for
+	vx/vy (as onnx_yolo26_pose.py-style scripts already do for ByteTracker) doesn't need
+	an if/else per tracker -- populated via simple frame-to-frame box-center deltas
+	instead of a Kalman velocity estimate."""
+
+	_next_id = 1
+
+	def __init__(self, detection, min_hits=1):
+		self.track_id = KeypointTrack._next_id
+		KeypointTrack._next_id += 1
+		self.box = list(detection['box'])
+		self.score = detection['score']
+		self.payload = _payload_of(detection)
+		self.lost_frames = 0
+		self.total_frames = 1
+		self.hits = 1
+		self.min_hits = min_hits
+		self.confirmed = self.hits >= self.min_hits
+		self.mean = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # only [4]/[5] (vx/vy) are ever read
+		self._cx, self._cy = self._box_center(self.box)
+
+	@staticmethod
+	def _box_center(box):
+		return (box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0
+
+	def update_matched(self, detection):
+		cx, cy = self._box_center(detection['box'])
+		self.mean[4] = cx - self._cx
+		self.mean[5] = cy - self._cy
+		self._cx, self._cy = cx, cy
+		self.box = list(detection['box'])
+		self.score = detection['score']
+		self.payload = _payload_of(detection)
+		self.lost_frames = 0
+		self.total_frames += 1
+		self.hits += 1
+		if self.hits >= self.min_hits:
+			self.confirmed = True
+
+	def mark_missed(self, score_decay):
+		"""Gradual confidence fade while unmatched -- same reasoning as the old script's
+		Skeleton tracking: a track that's genuinely gone should visibly fade rather than
+		vanish/reappear at full confidence, and this naturally pushes a long-missing
+		track's score below Confthreshold well before track_buffer finally drops it."""
+		self.lost_frames += 1
+		self.total_frames += 1
+		self.score *= score_decay
+
+
+class KeypointTracker:
+	"""Pose-specific tracker matching purely on keypoint position similarity, not box
+	IoU -- see the section docstring above for the full rationale and the interface
+	contract shared with ByteTracker.
+
+	Call .update(detections) once per frame; detections is a list of dicts with 'box'
+	[x1,y1,x2,y2], 'score', 'keypoints' (list of [x,y,...] per keypoint, same indexing
+	the caller's distance_keypoint_indices refers to), and any number of extra payload
+	keys (kept as-is on the matched KeypointTrack's .payload). Returns the list of
+	currently active KeypointTrack objects (order not significant)."""
+
+	def __init__(self, max_match_dist, distance_keypoint_indices=None, dup_dist_factor=0.5,
+			track_buffer=15, min_hits=1, score_decay=0.9, max_tracks=50):
+		self.max_match_dist = max_match_dist
+		# None = use every keypoint; a real caller should almost always pass a stable
+		# subset (see section docstring) -- left optional rather than required so a
+		# quick prototype against a new model can start simple.
+		self.distance_keypoint_indices = distance_keypoint_indices
+		# Duplicate-detection suppression threshold, as a fraction of max_match_dist --
+		# see update()'s comment for why this needs to be tighter than the match
+		# threshold itself (true duplicates are near-overlapping; distinct nearby people
+		# should still both spawn).
+		self.dup_dist_factor = dup_dist_factor
+		self.track_buffer = track_buffer
+		self.min_hits = min_hits
+		self.score_decay = score_decay
+		self.max_tracks = max_tracks
+		self.tracks = []
+
+	def _distance(self, kpts_a, kpts_b):
+		indices = self.distance_keypoint_indices
+		if indices is None:
+			indices = range(min(len(kpts_a), len(kpts_b)))
+		return keypoint_distance(kpts_a, kpts_b, indices)
+
+	def update(self, detections):
+		"""Greedy best-first matching: build every (track, detection) pair within
+		max_match_dist, sort by distance ascending, assign greedily -- same algorithm as
+		the old script's trackSkeletons(), generalized off its fixed slot list onto
+		self.tracks. Greedy-global (not per-row) avoids a suboptimal match when two
+		tracks/detections could each plausibly match either candidate."""
+		pairs = []
+		for ti, track in enumerate(self.tracks):
+			track_kpts = track.payload.get('keypoints')
+			if track_kpts is None:
+				continue
+			for di, det in enumerate(detections):
+				dist = self._distance(track_kpts, det['keypoints'])
+				if dist < self.max_match_dist:
+					pairs.append((dist, ti, di))
+		pairs.sort(key=lambda p: p[0])
+
+		matched_track_idx = set()
+		matched_det_idx = set()
+		for dist, ti, di in pairs:
+			if ti in matched_track_idx or di in matched_det_idx:
+				continue
+			self.tracks[ti].update_matched(detections[di])
+			matched_track_idx.add(ti)
+			matched_det_idx.add(di)
+
+		# Capture matched track OBJECTS (not indices) before pruning below reshuffles
+		# self.tracks -- needed for duplicate suppression further down.
+		matched_track_objs = [self.tracks[ti] for ti in matched_track_idx]
+
+		# Age/decay/prune unmatched existing tracks.
+		surviving = []
+		for ti, track in enumerate(self.tracks):
+			if ti not in matched_track_idx:
+				track.mark_missed(self.score_decay)
+				if track.lost_frames > self.track_buffer:
+					continue  # truly lost -- drop entirely
+			surviving.append(track)
+		self.tracks = surviving
+
+		# Spawn new tracks for unmatched detections. Before spawning, check if the
+		# detection is a near-duplicate of anything that just matched THIS frame --
+		# MoveNet-style multi-slot outputs can fire more than once on the same person,
+		# and those duplicates should be suppressed rather than becoming phantom tracks.
+		# Uses a TIGHTER threshold than max_match_dist itself (true duplicates are
+		# nearly overlapping; two distinct people standing close together should still
+		# both spawn/track independently).
+		dup_threshold = self.max_match_dist * self.dup_dist_factor
+		for di, det in enumerate(detections):
+			if di in matched_det_idx:
+				continue
+			is_duplicate = any(
+				self._distance(mt.payload['keypoints'], det['keypoints']) < dup_threshold
+				for mt in matched_track_objs
+			)
+			if is_duplicate:
+				continue
+			if len(self.tracks) >= self.max_tracks:
+				break
+			self.tracks.append(KeypointTrack(det, min_hits=self.min_hits))
+
+		return list(self.tracks)
+
+
 # ==================== SHARED CUSTOM-PAR HELP TEXT ====================
 # Every ONNX inference script in this project (onnx_yolo26_pose.py, onnx_yolo26_obj_det.py,
 # onnx_yolo26_seg.py, onnx_yunet.py) exposes the same core set of ByteTracker-related custom
@@ -536,6 +727,13 @@ _PAR_HELP_TEMPLATES = {
 		"a new detection. Too low risks a new {subject}'s detection getting absorbed into an "
 		"unrelated existing track; too high breaks continuous matching and causes constant "
 		"track-ID respawning."
+	),
+	'Maxmatchdist': (
+		"Maximum summed keypoint distance (KeypointTracker, not ByteTracker's box IoU -- see "
+		"object_tracker.py) to accept a match between an existing track and a new detection. "
+		"Too low breaks continuous matching on fast movement (constant track-ID respawning); "
+		"too high risks a new {subject}'s detection getting absorbed into an unrelated "
+		"existing track."
 	),
 	'Trackconfirmframes': (
 		"Total matched frames (not necessarily consecutive) a brand-new track needs before "

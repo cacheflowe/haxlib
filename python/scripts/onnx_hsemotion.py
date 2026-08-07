@@ -4,7 +4,6 @@ import cv2
 import onnxruntime as ort
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -145,7 +144,6 @@ class HSEmotionInference(ONNXInferenceManager):
 		# noise doesn't flicker the displayed dominant emotion.
 		self._emotion_state = {}
 		self.tracked_objects = []
-		self.pending_table_update = False
 		self._input_tensor_buf = None
 		self._input_buf_shape = None
 		self._output_buf = None
@@ -294,7 +292,7 @@ class HSEmotionInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for inp in inputs:
 			self.printONNX(f"  input name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 		if len(outputs) != 9:
 			self.printONNX(
 				f"WARNING: expected 9 outputs (score/bbox/kps x 3 FPN strides), got "
@@ -303,7 +301,7 @@ class HSEmotionInference(ONNXInferenceManager):
 			)
 
 		emotion_path = os.path.join(project.folder, 'data', 'ml', 'hsemotion', EMOTION_MODEL_FILENAME)
-		self._emotion_session = ort.InferenceSession(emotion_path, providers=self.onnx_util.providers())
+		self._emotion_session = ort.InferenceSession(emotion_path, providers=onnx_inference_manager.providers())
 		self.printONNX(f"Emotion classifier loaded: {emotion_path}")
 		self.printONNX(f"  Active providers: {self._emotion_session.get_providers()}")
 
@@ -352,7 +350,6 @@ class HSEmotionInference(ONNXInferenceManager):
 			if self._output_buf is None or self._output_buf_shape != needed_shape:
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
-			self.pending_table_update = True
 			return self.npu.flip_v(self._output_buf)
 
 		input_h, input_w = self.original_h, self.original_w
@@ -520,8 +517,15 @@ class HSEmotionInference(ONNXInferenceManager):
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
 			output_img = self._output_buf
-		self.pending_table_update = True
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output from tracked_objects right after this frame's texture
+		publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring. Gated by Outputtrackdata,
+		same reasoning as onnx_yolo26_seg.py's identical method."""
+		if self._par_or_default('Outputtrackdata', True):
+			self.write_tracks_to_table()
 
 	def _classify_emotions_batch(self, boxes_native):
 		"""Crop every given face (native/pre-flip box, normalized 0-1) from the working
@@ -690,10 +694,8 @@ def onCook(scriptOp):
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		if inference_manager._par_or_default('Outputtrackdata', True):
-			inference_manager.write_tracks_to_table()
+	# Table writes happen inside inference_manager.onCook(scriptOp) above now, via
+	# on_result_published() (still gated by Outputtrackdata internally).
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

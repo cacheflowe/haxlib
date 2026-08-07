@@ -4,7 +4,6 @@ import numpy as np
 import cv2
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -352,7 +351,6 @@ class YuNetInference(ONNXInferenceManager):
 		self._kpt_state = {}
 		# Structured tracking data exposed for CHOP/table consumption
 		self.tracked_objects = []
-		self.pending_table_update = False  # Flag for main-thread table flush
 		# YuNet needs setInputSize() called whenever the actual input dimensions change
 		# (it's a variable-input-resolution architecture, unlike the fixed-640 YOLO
 		# models) -- cached so we only call it on an actual change, not every frame.
@@ -750,10 +748,14 @@ class YuNetInference(ONNXInferenceManager):
 				self._output_buf_shape = needed_shape
 			output_img = self._output_buf
 
-		# Flag that we have new tracking data to flush on main thread
-		self.pending_table_update = True
-
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output/table_joints from tracked_objects right after this frame's
+		texture publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring."""
+		self.write_tracks_to_table()
+		self.write_joints_to_table()
 
 	def draw_tracked_faces(self):
 		"""Render bounding boxes + keypoints for tracked faces onto a blank image.
@@ -886,18 +888,13 @@ def onPulse(par):
 
 
 def onCook(scriptOp):
-	# Run base manager cook (handles model loading, inference dispatch, copyNumpyArray)
+	# Run base manager cook (handles model loading, inference dispatch, copyNumpyArray).
+	# Table writes happen inside this call now, via on_result_published().
 	inference_manager.onCook(scriptOp)
 
 	# Optionally draw boxes/keypoints on main thread (if enabled)
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
-
-	# Flush tracking data to Table DAT on main thread (safe for TD operator access)
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		inference_manager.write_tracks_to_table()
-		inference_manager.write_joints_to_table()
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

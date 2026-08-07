@@ -3,7 +3,6 @@ import numpy as np
 import cv2
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -189,7 +188,6 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 		self._proto_w = 160
 		# Structured tracking data exposed for CHOP/table consumption
 		self.tracked_objects = []
-		self.pending_table_update = False  # Flag for main-thread table flush
 		# Pre-allocated buffers (lazily sized)
 		self._output_buf = None
 		self._output_buf_shape = None
@@ -326,7 +324,7 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for i, inp in enumerate(inputs):
 			self.printONNX(f"  input[{i}] name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 		if len(outputs) != 2:
 			self.printONNX(
 				f"WARNING: expected 2 outputs (detections + mask protos), got {len(outputs)} -- "
@@ -370,7 +368,6 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 			if self._output_buf is None or self._output_buf_shape != needed_shape:
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
-			self.pending_table_update = True
 			return self.npu.flip_v(self._output_buf)
 
 		pred = outputs[0][0]          # (300, 38)
@@ -560,10 +557,16 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 		# track-label overlay on top of them.
 		output_img = self.npu.flip_v(self.draw_tracked_masks(draw_labels=DRAW_BOXES))
 
-		# Flag that we have new tracking data to flush on main thread
-		self.pending_table_update = True
-
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output from tracked_objects right after this frame's texture
+		publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring. Gated by Outputtrackdata
+		since this is pure "data output" overhead separate from the visual matte (see
+		OUTPUT_TRACK_DATA comment)."""
+		if self._par_or_default('Outputtrackdata', OUTPUT_TRACK_DATA):
+			self.write_tracks_to_table()
 
 	def draw_tracked_masks(self, draw_labels=False):
 		"""Render a soft-edged white silhouette matte for currently (this-frame) detected
@@ -701,13 +704,8 @@ def onCook(scriptOp):
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
-	# Flush tracking data to Table DAT on main thread (safe for TD operator access) --
-	# gated by Outputtrackdata since this is pure "data output" overhead separate from
-	# the visual matte (see OUTPUT_TRACK_DATA comment).
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		if inference_manager._par_or_default('Outputtrackdata', OUTPUT_TRACK_DATA):
-			inference_manager.write_tracks_to_table()
+	# Table writes happen inside inference_manager.onCook(scriptOp) above now, via
+	# on_result_published() (still gated by Outputtrackdata internally).
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:

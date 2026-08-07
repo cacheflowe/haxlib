@@ -5,7 +5,6 @@ import cv2
 import onnxruntime as ort
 
 # custom util imports
-import onnx_util
 import numpy as npu
 import onnx_inference_manager
 import object_tracker
@@ -328,7 +327,6 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		# already-smoothed landmarks (see Posesmoothing par help).
 		self._pose_state = {}
 		self.tracked_objects = []
-		self.pending_table_update = False
 		self._input_tensor_buf = None
 		self._input_buf_shape = None
 		self._output_buf = None
@@ -515,10 +513,10 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		inputs = session.get_inputs()
 		for inp in inputs:
 			self.printONNX(f"  input name='{inp.name}' shape={inp.shape} type={inp.type}")
-		self.onnx_util.check_providers(self.printONNX, session)
+		self.check_providers(session)
 
 		landmark_path = os.path.join(project.folder, 'data', 'ml', 'mediapipe', LANDMARK_MODEL_FILENAME)
-		self._landmark_session = ort.InferenceSession(landmark_path, providers=self.onnx_util.providers())
+		self._landmark_session = ort.InferenceSession(landmark_path, providers=onnx_inference_manager.providers())
 		self.printONNX(f"Face landmark model loaded: {landmark_path}")
 		self.printONNX(f"  Active providers: {self._landmark_session.get_providers()}")
 
@@ -582,7 +580,6 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 			if self._output_buf is None or self._output_buf_shape != needed_shape:
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
-			self.pending_table_update = True
 			return self.npu.flip_v(self._output_buf)
 
 		input_w, input_h = self.original_w, self.original_h
@@ -799,8 +796,16 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 				self._output_buf = np.zeros(needed_shape, dtype=np.float32)
 				self._output_buf_shape = needed_shape
 			output_img = self._output_buf
-		self.pending_table_update = True
 		return output_img
+
+	def on_result_published(self):
+		"""Flush table_output/table_landmarks from tracked_objects right after this
+		frame's texture publishes, before the next frame's capture/dispatch -- see
+		ONNXInferenceManager.on_result_published()'s docstring. Gated by Outputtrackdata,
+		same reasoning as onnx_yolo26_seg.py's identical method."""
+		if self._par_or_default('Outputtrackdata', True):
+			self.write_tracks_to_table()
+			self.write_landmarks_to_table()
 
 	def _run_landmarks_batch(self, confirmed, roi_scale):
 		"""Extract each confirmed face's own rotation-aligned crop (via its own affine
@@ -1056,11 +1061,8 @@ def onCook(scriptOp):
 	global DRAW_BOXES
 	DRAW_BOXES = parent().par.Drawdebug.eval() == 1
 
-	if inference_manager.pending_table_update:
-		inference_manager.pending_table_update = False
-		if inference_manager._par_or_default('Outputtrackdata', True):
-			inference_manager.write_tracks_to_table()
-			inference_manager.write_landmarks_to_table()
+	# Table writes happen inside inference_manager.onCook(scriptOp) above now, via
+	# on_result_published() (still gated by Outputtrackdata internally).
 
 
 def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
