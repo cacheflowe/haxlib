@@ -4,44 +4,61 @@ This document is a practical guide for humans working in our agentic coding work
 
 Core ideas are:
 
-- Skills, prompts, MCP servers, and /docs are the core tools that we use to guide our agents. They are:
+- **Skills**, **prompts**, **MCP servers**, and **/docs** are the core tools that we use to guide our agents. They are:
+  - A way to ensure that *my* agent and *your* agent behave the same way on the same repo, even if we are using different tools (Claude vs Copilot, or VSCode vs Zed)
   - The shared memory of a project
-  - Guidance for agents' behavior
-  - Guardrails to keep agents from breaking from our desired coding pattern
+  - Guidance for agents' behavior (ex: don't commit or push autonomously)
+  - Guardrails that align agents to our desired coding patterns & preferences
   - Hallucination mitigation
-  - Extra superpowers with specific tools
-  - A way to ensure that *my* agent and *your* agent behave the same way on the same repo, even if we are using different tools.
-- When we start a new agent chat session, we should be able to recover the most important (shared) context from the repo itself, not from a previous chat on our individual machine.
-- We do not optimize around a single AI vendor. We optimize around a repeatable working style, with the `.ai/` harness as the portable source of truth for instructions, skills, prompts, and MCP configuration. That lets the team move between GitHub Copilot, Claude, Antigravity CLI, Codex, `.pi`, and local-model setups without reinventing the operating model for each tool.
+  - Extra superpowers via MCP servers
+- When we start a new agent chat session, the agent should be able to recover the most important (shared) context from the repo itself, **not from a previous chat on our individual machine**.
+- We support multiple agentic stacks, since developers have different preferences and constraints. We optimize around a repeatable working style, with this project's `.ai/` harness as the portable source of truth for instructions, skills, prompts, and MCP configuration. That lets the team move between GitHub Copilot, Claude, Antigravity CLI, Codex, `.pi`, and locally-hosted setups while providing consistent behavior and shared context for (almost) any agentic coding workflow.
 
 ## The bare minimum agent setup for a project:
 
 If you don't need the full weight of this sync tool, you can still get a lot of value from a few simple files:
 
 - /AGENTS.md - project-specific instructions for agents, including coding preferences, tools, resources, concepts, and examples. This file should be recognized by most agents, and is the single source of truth for project-specific instructions.
-- /CLAUDE.md - the file contents should be `@AGENTS.md`, which tells Claude to load the instructions from AGENTS.md.
+- /CLAUDE.md - the file contents should be `@AGENTS.md`, which points Claude to the instructions in AGENTS.md. This is like a micro implementation of this larger sync and docs tool, in case you don't need the full system.
 
-After that, you can also add /docs for a more durable memory layer. These /docs should be linked to from AGENTS.md. Beyond this vanilla setup, if you use skills, prompts, and mcp servers, you can use the harness sync tool to better manage these features, so that all agents see the same configuration.
+After that, you can also add /docs for a more durable memory layer. These /docs should be linked to from AGENTS.md. Beyond this vanilla setup, if you use skills, prompts, and mcp servers, you should use the harness sync tool to better manage these features, so that all agents see the same configuration.
 
-## What We Standardize
+This looks like:
 
-This repository exists to make agent/harness setup portable across projects and teammates. 
+```
+docs/
+AGENTS.md
+CLAUDE.md (points to AGENTS.md)
+```
 
-- `.ai/AGENTS.md` carries project-specific instructions for agents, and links to the following files. Equivalent to AGENTS.md or CLAUDE.md. We keep it in `/.ai` so that we don't need to manage multiple copies for different agents (Claude in particular). 
-- `.ai/skills/` holds reusable domain knowledge and workflow guidance.
-- `.ai/prompts/` holds explicit slash commands for common tasks, including setup, validation, and review.
-- `.ai/mcp-servers.json` is the single source of truth for MCP servers.
-- `docs/` is where project-specific human and agent documentation should live when a project has enough complexity to justify it.
+## Using this .ai/ sync tool for a more robust agentic setup
+
+### Getting started
+
+To begin using this sync tool in your project
+
+
+### What to edit in your project
+
+This repository's tooling is intended to make our agent/harness setups portable across projects and teammates. Here are the primary files that should be *edited* in your coding project, and maintained over time:
+
+- `.ai/AGENTS.md` carries project-specific instructions for agents, and links to the following files. Equivalent to the vanilla /AGENTS.md or /CLAUDE.md. We keep it in `/.ai` so that we don't need to manage multiple copies for different agents (Claude in particular doesn't yet look for AGENTS.md in the root). This AGENTS.md file is automatically combined with `.ai/_base.md` to provide a complete set of instructions and context for agents to understand how this sync tooling works within a project.
+- `.ai/skills/*` holds reusable domain knowledge and workflow guidance. We should maintain libraries of common skills that can be shared across projects, organized by technology or domain.
+- `.ai/prompts/*` holds explicit slash commands for common tasks, including setup, validation, and review. These simply save us from repeatedly writing the same instructions and ensure consistency across agents.
+- `.ai/mcp-servers.json` is the single source of truth for MCP servers so that all agents have a consistent view of available external tools and integrations. There are slight differences in running MCP servers across different agents, but this file ensures a unified configuration.
+- `docs/*` is where project-specific *human and agent* documentation should live when a project has enough complexity to justify it.
 
 ## How it works (problems this tool solves)
 
-This tool's primary purpose is to create **symlinks** from the single source of truth in `.ai/` to the locations that each agent expects. This ensures that all agents see the same instructions, skills, prompts, and MCP servers, even if they have different expectations for where those files should live. We only support a limited set of agents, but the same principles apply to any agent that can be configured to read from a specific file or directory.
+This tool's primary purpose is to create **symlinks** from the single source of truth in `.ai/` to the locations that each agent expects. This ensures that all agents see the same instructions, skills, prompts, and MCP servers, even if they have different expectations for where those files should live. We only support a limited set of agents, but the same principles apply to any agent that could be added later. Over time, we expect and hope that more agents will support standardized file locations, and this tool will become less necessary.
 
 ### Documentation and skills as Memory
 
-In agentic development, documentation is operational memory for future sessions. This memory should be stored (and maintained) as markdown files in the repo. Agents otherwise lose chat context between sessions, and have to rebuild their understanding of a project and developer preferences each time. This costs time and tokens. The concept of a durable memory layer is the repository itself, especially `.ai/skills` and `docs/`. This ensures that both humans and agents across the team can access the same knowledge consistently.
+In agentic development, documentation is operational memory for future sessions. This memory should be stored (and maintained) as markdown files in the repo. Agents otherwise lose chat context between sessions, and have to rebuild their understanding of a project and developer preferences each time. This costs time and tokens. The concept of a durable memory layer is the repository itself, especially `.ai/AGENTS.md`, `.ai/skills/`, and `docs/`. This ensures that both humans and agents across the team can access the same knowledge consistently.
 
-As code is built, the team should capture learnings, patterns, and workflows in skills and docs. This is how we ensure that future sessions can recover context quickly, and generally **be smarter**. When an agent finishes a difficult task, or had to debug a tricky problem, it should summarize the change and update relevant docs/skills/prompts in the same commit. This ensures that future sessions can solve a similar problem with less churn. We have a specific pattern for this in `/docs/learnings/`, called out in `.ai/_base.md`. This should be updated whenever a non-obvious problem is solved. 
+As code is built, the team should capture learnings, patterns, and workflows in skills and docs. This is how we ensure that future agent chat sessions can recover context quickly, and generally **be smarter**. When an agent finishes a difficult task, or spent a lot of time debugging a tricky problem, it should summarize the change and update relevant docs/skills/prompts in the same commit. You, the human, need to ask it to do so. This ensures that future agents can solve a similar problem with less churn. We have a specific pattern for this in `/docs/learnings/`, called out in `.ai/_base.md`. This should be updated whenever a non-obvious problem is solved. 
+
+It can be tricky to know where to put new learnings. The general rule is that if it is a repeatable pattern, it should be captured as a skill. If it is a one-off lesson, it should be captured in `/docs/learnings/`. If it is a project-specific preference, it should be captured in `.ai/AGENTS.md`.
 
 #### Extra tooling
 
@@ -53,41 +70,43 @@ As code is built, the team should capture learnings, patterns, and workflows in 
 
 Once a codebase is significant enough, `docs/` should be created and maintained as part of engineering work, not as optional cleanup. A larger codebase is when we move from encoding info in AGENTS.md to encoding it in a more durable memory layer. 
 
-When the threshold is met, bootstrap docs structure with [.ai/prompts/harness-docs-setup.md](.ai/prompts/harness-docs-setup.md) and keep it current as part of ongoing delivery.
+When the threshold is met, you can bootstrap docs structure with the premade prompt ([.ai/prompts/harness-docs-setup.md](.ai/prompts/harness-docs-setup.md)) and keep it current as part of ongoing maintenance during a project lifecycle.
 
-If `docs/` is missing, sparse, or not organized for agent retrieval, you can explicitly run the setup prompt (`/harness-docs-setup`) instead of inventing ad hoc structure. Though for smaller codebases, the full docs structure may be overkill, and a smattering of ad hoc markdown files may be sufficient. The key is that the docs should be discoverable and useful to both humans and agents.
+If `docs/` is missing, sparse, or not organized for agent retrieval, you can explicitly run the setup prompt (`/harness-docs-setup`) instead of inventing a new structure. For smaller codebases, the full docs structure may be overkill, and a smattering of ad hoc markdown files may be sufficient. The key is that the docs should be discoverable and useful to both humans and agents.
 
 
 
+### When and how to use AGENTS.md
 ### When and how to use skills
+### When and how to use prompts/commands
 ### When and how to use mcp servers
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-### Maintenance loop
+### How to run the sync script
+### How to maintain your agent files over time
 
 To keep memory useful:
 
-1. Update skills/prompts/docs in the same change where behavior changes.
+1. Update skills/prompts/docs when behavior changes, new preferences or patterns emerge, or new lessons are learned.
 2. Run [.ai/prompts/update-docs.md](.ai/prompts/update-docs.md) after meaningful code or workflow changes.
 3. As an agent finishes a task - especially a difficult task - ask it to summarize the change and update relevant docs/learnings/skills/prompts in the same commit.
-4. Re-run sync so generated harness files pick up new context.
+4. Re-run sync so generated harness files pick up new context. Running the watcher is a good way to ensure that the harness is always up to date.
 5. Validate discoverability in a fresh session using [.ai/docs/test-instructions.md](.ai/docs/test-instructions.md).
 
 If the maintenance loop reveals major documentation gaps, run [.ai/prompts/harness-docs-setup.md](.ai/prompts/harness-docs-setup.md) again and reconcile the resulting structure with current project reality.
 
 This turns documentation from passive reference into active runtime context for every new agent session.
+
+#### Update skills and docs while doing the work
+
+Do not treat documentation and skill updates as end-of-project cleanup. In this workflow, they are part of implementation.
+
+- When a new pattern becomes repeatable, capture it as a skill or prompt.
+- When a command, workflow, or architecture decision changes, update the relevant doc in the same change.
+- When a debugging lesson or migration pitfall appears, write it down where future sessions can load it quickly.
+
+This is how preferences and team learnings survive session boundaries. A new chat session should recover project context from files, not from memory of a previous conversation.
+
+The practical rule is simple: if you had to explain it twice, it should probably become a skill, prompt, or doc update.
+
 
 ## Team Defaults
 
@@ -98,6 +117,50 @@ Our institutional default is paid, supported tools first.
 - Open source and local models, including `.pi` wired to local backends such as Gemma, are useful for experimentation, privacy-sensitive workflows, offline work, and cost control, but they should inherit the same instructions and operating standards where possible. See [.ai/docs/local-llm-hosting.md](.ai/docs/local-llm-hosting.md) for local hosting notes in this repo.
 
 Standardization matters more than tool loyalty. A teammate should be able to enter a repo, run the harness sync, and get the same baseline behavior regardless of interface.
+
+
+
+
+
+## Future Enhancements
+
+Potential additions to our stack:
+- https://github.com/TencentCloud/TencentDB-Agent-Memory/
+
+
+
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+---
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Setting Up Your Tooling
 

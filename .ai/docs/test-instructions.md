@@ -5,11 +5,6 @@ How to verify that commands, skills, MCP servers, and the shared context files
 visible to each harness: **Claude Code**, **GitHub Copilot**, **Codex**, and
 **Antigravity CLI**.
 
-> **Note:** Antigravity CLI (`agy`) is the successor to Gemini CLI and shares
-> Codex's `.agents/` layout for skills, context, and MCP. Most "Codex" steps
-> below apply identically to Antigravity — call-outs are added where they
-> diverge.
-
 ## 0. Prerequisite: run the sync
 
 All generated files come from `.ai/` sources. Before testing anything, regenerate:
