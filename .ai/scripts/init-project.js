@@ -18,14 +18,17 @@
  *               files (.ai/scripts/, .ai/_base.md, .ai/docs/) and add any new example
  *               skills/prompts that don't exist yet. Never touches .ai/AGENTS.md,
  *               .ai/mcp-servers.json, or existing .ai/skills|prompts files (those are
- *               adopter-owned). Without this flag, an existing .ai/ is left untouched unless
- *               --force is also passed (which wholesale-replaces it — only for fresh copies).
+ *               adopter-owned).
  *   --force     Without --update: overwrite an existing .ai/ directory in the target instead of
- *               skipping it. With --update: also overwrite existing example skills/prompts.
- *               Also lets the script proceed even if conflicting generated-target files are
- *               found (see below).
+ *               skipping it (a wholesale from-scratch reset). With --update: also overwrite
+ *               existing example skills/prompts. Also lets the script proceed even if
+ *               conflicting generated-target files are found (see below).
  *   --no-sync   Skip running `node .ai/scripts/sync.js` in the target after copying.
  *   --dry-run   Print what would happen without writing anything.
+ *
+ * IMPORTANT: If the target already has a `.ai/` directory and neither --update nor --force is
+ * passed, this script copies/syncs NOTHING — it prints a loud warning telling you to rerun with
+ * --update instead, so you never accidentally no-op a sync against a stale toolkit.
  *
  * Before copying anything, this script checks whether the target already has non-generated
  * files at paths the sync engine manages (AGENTS.md, CLAUDE.md, .mcp.json, etc.) — e.g. a
@@ -41,6 +44,7 @@ let path;
 let cp;
 let ROOT;
 let TARGET;
+let TARGET_ARG;
 let FORCE;
 let NO_SYNC;
 let DRY_RUN;
@@ -66,6 +70,7 @@ async function initRuntime() {
     process.exit(1);
   }
 
+  TARGET_ARG = args[0];
   TARGET = path.resolve(process.cwd(), args[0]);
 
   if (path.resolve(TARGET) === path.resolve(ROOT)) {
@@ -164,6 +169,18 @@ function updateAiDirectory() {
   log(`  skip   ${AI_NEVER_TOUCH_PATHS.join(", ")} (adopter-owned — never touched)`);
 }
 
+/**
+ * Short banner printed at the very end when .ai/ already existed and nothing was touched,
+ * pointing at --update as the next step.
+ */
+function printExistingAiWarning() {
+  const line = "=".repeat(78);
+  console.error(`\n${line}`);
+  console.error("⚠️   .ai/ ALREADY EXISTS IN THE TARGET — NOTHING WAS COPIED OR SYNCED.");
+  console.error(line);
+  console.error(`Rerun with --update to refresh the harness: npm run ai-init -- ${TARGET_ARG} --update`);
+}
+
 /** Copy a whole directory tree from source into the target, skipping if it already exists (unless --force). */
 function copyDirIfAbsent(relPath) {
   const src = path.join(ROOT, relPath);
@@ -173,11 +190,7 @@ function copyDirIfAbsent(relPath) {
     return;
   }
   if (fs.existsSync(dest) && !FORCE) {
-    const hint =
-      relPath === ".ai"
-        ? "rerun with --update to refresh harness internals, or --force to overwrite everything"
-        : "rerun with --force to overwrite";
-    log(`  skip   ${relPath}/ (already exists in target — ${hint})`);
+    log(`  skip   ${relPath}/ (already exists in target — rerun with --force to overwrite)`);
     return;
   }
   log(`  copy   ${relPath}/`);
@@ -363,8 +376,14 @@ async function main() {
   ensureDir(TARGET);
 
   log("\nStep 1: Copy the core toolkit");
-  if (UPDATE && fs.existsSync(path.join(TARGET, ".ai"))) {
+  const aiExists = fs.existsSync(path.join(TARGET, ".ai"));
+  let skippedExistingAi = false;
+
+  if (UPDATE && aiExists) {
     updateAiDirectory();
+  } else if (aiExists && !FORCE) {
+    skippedExistingAi = true;
+    log("  skip   .ai/ (already exists — see note at the end)");
   } else {
     copyDirIfAbsent(".ai");
   }
@@ -377,12 +396,14 @@ async function main() {
   mergePackageJson();
   mergeVscodeTasks();
 
-  if (!DRY_RUN && !NO_SYNC) {
+  if (skippedExistingAi) {
+    log("\nStep 3: (skipped — .ai/ already exists)");
+  } else if (!DRY_RUN && !NO_SYNC) {
     log("\nStep 3: Run the sync");
     try {
       cp.execSync("node .ai/scripts/sync.js", { cwd: TARGET, stdio: "inherit" });
     } catch (err) {
-      console.error("Sync failed to run automatically. Run it manually with:");
+      console.error("❌ Sync failed to run automatically. Run it manually with:");
       console.error(`  cd ${relTarget(TARGET) || "."} && node .ai/scripts/sync.js`);
     }
   } else if (DRY_RUN) {
@@ -391,7 +412,11 @@ async function main() {
     log("\nStep 3: (skipped — --no-sync) run `node .ai/scripts/sync.js` in target when ready");
   }
 
-  log("\nDone. Remember to run `git config core.hooksPath .githooks` in the target to enable git-hook auto-sync.");
+  if (skippedExistingAi) {
+    printExistingAiWarning();
+  } else {
+    log("\n✅ Done. Remember to run `git config core.hooksPath .githooks` in the target to enable git-hook auto-sync.");
+  }
 }
 
 main().catch((err) => {

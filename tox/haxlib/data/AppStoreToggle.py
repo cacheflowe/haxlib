@@ -104,6 +104,7 @@ class AppStoreToggle:
 		if prev < 1.0 and val >= 1.0:
 			self._pulses.add('showing')
 			self.doCallback('showing')
+			self.ownerComp.color = (0, 1, 0)  # green when fully shown
 			if self._queued == _HIDE:
 				self._queued = None
 				self.Hide()
@@ -113,6 +114,7 @@ class AppStoreToggle:
 		if prev > 0.0 and val <= 0.0:
 			self._pulses.add('hidden')
 			self.doCallback('hidden')
+			self.ownerComp.color = (0, 0, 0)  # red when fully hidden
 			if self._queued == _SHOW:
 				self._queued = None
 				self.Show()

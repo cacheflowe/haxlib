@@ -226,6 +226,9 @@ weighted layer at load) — not a compatibility concern, and not evidence of cus
   - https://github.com/zhongyy/SFace
   - https://huggingface.co/deven96/face_recognition_sface/tree/main
   - https://github.com/peiyunh/tiny (OLD)
+- Head classification (hat, open mouth, sunglasses)
+  - https://github.com/PINTO0309/PINTO_model_zoo/tree/main/495_Comprehensive-Head-Classification
+- 
 - Person segmentation
   - https://github.com/PierreMarieCurie/rf-detr-onnx
   - https://derivative.ca/community-post/tutorial/rf-detr-touchdesigner/74780
