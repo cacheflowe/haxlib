@@ -22,7 +22,6 @@ import queue
 import gc
 import numpy as np
 import onnxruntime as ort
-import math
 # `td` is the one TD global this module imports explicitly (against the usual DAT-script
 # convention of never importing it) -- absTime/op/parent/etc. are "pre-loaded globals" for
 # a DAT's own directly-executed script code, but this is a plain imported module
@@ -622,7 +621,60 @@ class ONNXInferenceManager:
 			return f"error: {self.load_error}"
 		else:
 			return "not_loaded"
-	
+
+	def needs_prewarm(self):
+		"""True while the model hasn't finished loading (or failed) and this scriptOp still
+		needs to be force-cooked to make progress.
+
+		Nothing wires most of these ONNX COMPs' outputs downstream by default, so TD's normal
+		pull-based cooking never gives script1 a cook request on its own -- see
+		schedule_prewarm_cook() for how this gets forced without a dedicated Execute DAT.
+		Reads self.session/self.load_error directly (real per-session state, set fresh in
+		__init__) rather than the persisted Loadstatus custom par, which can still show a
+		stale 'loaded' string left over from the last time the project was saved.
+		"""
+		return self.session is None and self.load_error is None
+
+	def schedule_prewarm_cook(self, scriptOp, callbacksDAT, delayFrames=1):
+		"""Force scriptOp to cook on a future frame if the model still needs loading, entirely
+		via Python -- no dedicated Execute DAT required.
+
+		Safe to call from ANY context, including scriptOp's own Callbacks module at import
+		time (module-level code that runs as part of scriptOp's own cook/compile): this method
+		itself never calls .cook() directly, only td.run(), so it never reenters that compile.
+		A direct, synchronous op('script1').cook(force=True) call from module-level code in
+		scriptOp's own Callbacks DAT was tried and rejected by TD outright ("Unexpected error
+		during compilation... check for cook loop", verified live) -- calling scriptOp.cook()
+		is only safe once execution has actually moved to a later, unrelated frame, which is
+		exactly what the deferred call below guarantees. See _prewarm_tick() for the half of
+		this that actually cooks.
+
+		Absolute op paths are baked into the deferred call (rather than using scriptOp/
+		callbacksDAT/self directly) because td.run() strings execute later, outside of any
+		Python closure -- there's nothing to close over by the time it actually runs.
+		"""
+		if not self.needs_prewarm():
+			return
+		# td.run(), not a bare run(): this module is imported via plain Python import (see the
+		# module-level `import td`), so TD's DAT-script globals (run, op, ...) were never
+		# injected into its own namespace the way they are in a directly-executed DAT script.
+		td.run(
+			f"op({callbacksDAT.path!r}).module.inference_manager._prewarm_tick("
+			f"op({scriptOp.path!r}), op({callbacksDAT.path!r}))",
+			delayFrames=delayFrames,
+		)
+
+	def _prewarm_tick(self, scriptOp, callbacksDAT):
+		"""The actual force-cook, only ever invoked via schedule_prewarm_cook()'s deferred
+		td.run() call -- never synchronously from scriptOp's own compile, so cooking it
+		directly here is safe. Reschedules itself (through schedule_prewarm_cook, which
+		re-checks needs_prewarm()) until the model resolves, then the chain stops on its own.
+		"""
+		if not self.needs_prewarm():
+			return
+		scriptOp.cook(force=True)
+		self.schedule_prewarm_cook(scriptOp, callbacksDAT)
+
 	# ========== Threaded Inference ==========
 
 	def _ensure_worker_started(self):
@@ -799,14 +851,6 @@ class ONNXInferenceManager:
 				raw_outputs = self.pending_result
 				self.pending_result = None
 				self.frames_skipped = 0
-				
-				# Update performance metrics if available
-				try:
-					self.opPerformance.par.const0value = self.frames_skipped_final
-					if self.frames_skipped_final > 0:  # Prevent div by zero
-						self.opPerformance.par.const1value = math.floor(60 / self.frames_skipped_final)
-				except:
-					pass  # Performance constants not available
 				
 				# Postprocess on main thread (safe for TD operator access). For every
 				# tracker script in this project, THIS call is where the frame's real

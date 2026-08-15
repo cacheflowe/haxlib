@@ -605,7 +605,6 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 # mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
 # a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = RFDETRSegmentationInference()
-inference_manager.opPerformance = op('constant_performance')
 onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
 # TouchDesigner callback wrappers that delegate to the manager

@@ -684,8 +684,14 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 # mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
 # a real crash trying to persist a live, unpicklable manager instance).
 inference_manager = YOLO26SegmentationInference()
-inference_manager.opPerformance = op('constant_performance')
 onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
+
+# Kick the model load off without waiting for TD's pull-based cooking to ever give script1 a
+# cook request on its own -- nothing wires this COMP's output downstream by default, so
+# without this, script1 would never cook (and the model would never load) until something
+# visits/views/wires it. See ONNXInferenceManager.schedule_prewarm_cook()'s docstring for why
+# this has to go through a deferred td.run() rather than a direct cook(force=True) call here.
+inference_manager.schedule_prewarm_cook(op('script1'), me)
 
 # TouchDesigner callback wrappers that delegate to the manager
 def onSetupParameters(scriptOp):
