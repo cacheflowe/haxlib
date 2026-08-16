@@ -20,26 +20,20 @@ _track_color = object_tracker.track_color
 # confirmed against this specific export -- see PERSON_CLASS_ID comment below.
 MODEL_FILENAME = 'rf-detr-seg-nano.onnx'
 
-# Confirmed live (session.get_outputs() against the real file) that this export's OUTPUT
-# NAMES DO NOT MATCH THEIR OWN SHAPES:
+# This export's OUTPUT NAMES DO NOT MATCH THEIR OWN SHAPES:
 #   name='pred_masks'  shape=[1, 100, 4]        <- this is actually the BOX tensor
 #   name='pred_boxes'  shape=[1, 100, 91]       <- this is actually the CLASS LOGIT tensor
 #   name='pred_logits' shape=[1, 100, 96, 96]   <- this is actually the MASK tensor
-# The upstream reference script (rfdetr_onnx.py) never notices this because it unpacks
-# session.run(None, ...)'s return list POSITIONALLY (outputs[0]/[1]/[2]), never by name.
-# So do we: on_model_loaded() below resolves each output's ACTUAL index by its shape
-# signature (last dim 4 -> boxes, last dim matching NUM_CLASSES -> logits, 4D -> masks)
-# once at load time, rather than hardcoding positions 0/1/2 or trusting the name strings
-# either way, so this stays correct even if a future re-export reorders the graph outputs.
+# on_model_loaded() below resolves each output's ACTUAL index by its shape signature
+# (last dim 4 -> boxes, last dim matching NUM_CLASSES -> logits, 4D -> masks) once at
+# load time instead of trusting the name strings or hardcoding positions 0/1/2, so this
+# stays correct even if a future re-export reorders the graph outputs.
 NUM_QUERIES = 100     # this model's query count (rf-detr-small.onnx, non-seg, uses 300)
 NUM_CLASSES = 91      # standard COCO-91 (paper table with gaps) class-logit width
 
-# Confirmed live via a synthetic probe (rf-detr-seg-small.onnx run against a real frame
-# containing two visually-obvious people -- a foreground runner and a background
-# photographer -- both scored >0.87 under class id 1, and a box+mask overlay visually
-# confirmed both boxes/masks land on the two people, not some other object). Standard
-# COCO-91 convention puts "person" at id 1; ONLY this id is verified against this specific
-# export -- no other class index is mapped or supported by this person-only script.
+# Standard COCO-91 convention puts "person" at id 1; ONLY this id is verified against
+# this specific export -- no other class index is mapped or supported by this
+# person-only script.
 PERSON_CLASS_ID = 1
 
 # Model input is 384x384 (much smaller than YOLO26's 640x640) -- TD's fit_square_sm needs
@@ -61,8 +55,8 @@ def _sigmoid(x):
 
 # Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). ByteTracker's
 # "high confidence" threshold -- detections at or above this score are matched first and
-# can start brand-new tracks. Confirmed-live real detections scored 0.87-0.95; background
-# noise stayed well under 0.2, so 0.5 leaves comfortable margin either side.
+# can start brand-new tracks. Real detections score well above this; background noise
+# stays well under it, so 0.5 leaves comfortable margin either side.
 CONF_THRESHOLD = 0.5
 
 # ByteTracker's "low confidence" threshold -- see onnx_yolo26_seg.py's identical comment
@@ -81,7 +75,7 @@ MIN_BOX_HEIGHT = 0.02
 # Reject a decoded mask that fills less than this fraction of ITS OWN detection box (after
 # cropping to that box -- see postprocess()) -- identical reasoning to
 # onnx_yolo26_seg.py's MIN_MASK_AREA_RATIO (scale-invariant regardless of how near/far a
-# person is). Confirmed-live real detections filled ~29-53% of their own box.
+# person is). Real detections typically fill ~30-50% of their own box.
 MIN_MASK_AREA_RATIO = 0.15
 
 # Sigmoid probability cutoff used ONLY to compute the fill-ratio noise-rejection check --
@@ -125,12 +119,12 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 	  each query's max class probability, label is its argmax.
 	- Masks are NOT decoded from shared prototypes + per-detection coefficients like
 	  YOLO26-seg -- each query already carries its own full mask tensor directly
-	  (100, 96, 96), confirmed live to be FULL-FRAME-aligned (each 96x96 grid covers the
-	  whole input frame at low res, not just that query's own box region) -- same
-	  box-cropping technique as YOLO26-seg's proto decode still applies (crop to the
-	  query's own box in native 96x96 space, both for noise-rejection AND to keep the
-	  visual matte free of stray activations from other people/background), it's just
-	  applied to an already-decoded mask instead of a matmul'd one.
+	  (100, 96, 96), and each 96x96 grid is FULL-FRAME-aligned (covers the whole input
+	  frame at low res, not just that query's own box region). Same box-cropping
+	  technique as YOLO26-seg's proto decode still applies (crop to the query's own box
+	  in native 96x96 space, both for noise-rejection AND to keep the visual matte free
+	  of stray activations from other people/background), it's just applied to an
+	  already-decoded mask instead of a matmul'd one.
 	- This export's OUTPUT NAMES DON'T MATCH THEIR SHAPES (see MODEL_FILENAME comment) --
 	  on_model_loaded() resolves the real box/logit/mask output indices from their shapes
 	  once at load time rather than trusting names or hardcoding positions.
@@ -144,16 +138,11 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 
 	def __init__(self):
 		super().__init__()
-		# Confirmed live (visual input/output sync test) that this model's inference is
-		# now fast/consistent enough that the default delayed=True GPU texture readback
-		# (accepts whatever frame TD's async download queue happens to have ready, which
-		# can be staler than "1 frame old" under load) costs more real end-to-end latency
-		# than the synchronous stall delayed=False trades it for. Confirmed by the
-		# network's own cache/cacheselect Framedelay dropping from 6 to 3 frames needed
-		# for visual sync with this on. NOT changed as the base class default -- other
-		# scripts (heavier models, tighter frame budgets) haven't been re-verified against
-		# this tradeoff and could regress from the added stall; see
-		# onnx_inference_manager.py's numpy_array_delayed docstring.
+		# This script's inference is fast/consistent enough that the synchronous stall
+		# from delayed=False costs less end-to-end latency than the staleness
+		# delayed=True's async readback can introduce under load -- see Round 2 in
+		# td-threaded-inference-optimization.md for the full investigation (and why this
+		# is set per-script rather than changed as the base class default).
 		self.numpy_array_delayed = False
 		self.opOutputTableDAT = parent().op('table_output')
 		self.conf_threshold = CONF_THRESHOLD
@@ -233,7 +222,7 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 		p[0].clampMax = True
 		p[0].help = ("Rejects a decoded mask if it fills less than this fraction of ITS OWN detection "
 			"box (not a fraction of the whole frame -- scale-invariant regardless of how near/far a "
-			"person is). Confirmed-live real detections filled ~29-53% of their own box; much lower "
+			"person is). Real detections typically fill ~30-50% of their own box; much lower "
 			"usually means a degenerate/noisy mask.")
 		scriptOp.par.Minmaskarea = MIN_MASK_AREA_RATIO
 		p = page.appendFloat('Maskthreshold', label='Mask Threshold (Noise Filter Only)', size=1)
@@ -428,10 +417,8 @@ class RFDETRSegmentationInference(ONNXInferenceManager):
 			masks = _sigmoid(masks_raw)
 			binary_masks = masks > mask_threshold
 
-			# Crop each mask to its own detection box -- confirmed live that these masks
-			# are FULL-FRAME-aligned (a synthetic probe found the un-cropped mask only
-			# loosely tracked the target person; resizing+cropping to the box tightened
-			# it to a clean silhouette), same reasoning as onnx_yolo26_seg.py's proto-mask
+			# Crop each mask to its own detection box -- these masks are FULL-FRAME-aligned
+			# (see class docstring), same reasoning as onnx_yolo26_seg.py's proto-mask
 			# crop: without confining it to the box that produced it, activations
 			# elsewhere in the frame (background, another person) show through as noise.
 			px1 = np.clip((boxes_native[:, 0] * proto_w).astype(np.intp), 0, proto_w)

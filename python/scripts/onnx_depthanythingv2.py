@@ -15,25 +15,17 @@ ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 # unlike onnx_rvm_seg.py (this project's other texture-in/texture-out script, and the
 # closest architectural match), Depth Anything is plain frame-independent inference --
 # no recurrent state carried between frames, so no IOBinding override is needed either;
-# the base class's default session.run() (see ONNXInferenceManager.run_inference()'s
-# docstring) already covers this model exactly.
+# the base class's default session.run() already covers this model exactly.
 #
-# This replaces script1_callbacks_depthanything.py, an older script written before this
-# project settled on the shared ONNXInferenceManager conventions (shutdown_and_register,
-# onnx_util.providers(), etc.) that every onnx_*.py script now uses. That script supported
-# several other depth models (MiDaS v2, DPT-BEiT, a rank-5 HuggingFace export) via
-# branching in preprocess()/on_model_loaded() -- all dropped here since this project only
-# ever runs depth_anything_v2_vits_dynamic.onnx now; see git history for the old script if
-# any of those other models are needed again.
+# Only depth_anything_v2_vits_dynamic.onnx is supported; older depth models (MiDaS v2,
+# DPT-BEiT, a HuggingFace rank-5 export) were dropped -- see git history if needed again.
 MODEL_FILENAME = 'depth_anything_v2_vits_dynamic.onnx'
 
-# Confirmed live (session.get_inputs()/get_outputs() against the real file):
-#   input:  'image' [batch, 3, height, width] float32
-#   output: 'depth' [batch, 14*floor(height/14), 14*floor(width/14)] float32 -- the ViT
-#           encoder's 14px patch size means the output can be very slightly smaller than
-#           the input if height/width aren't already multiples of 14. postprocess() just
-#           uses the output's own shape directly rather than resizing back up, same as
-#           the old script this replaces.
+# input:  'image' [batch, 3, height, width] float32
+# output: 'depth' [batch, 14*floor(height/14), 14*floor(width/14)] float32 -- the ViT
+#         encoder's 14px patch size means the output can be very slightly smaller than
+#         the input if height/width aren't already multiples of 14. postprocess() uses
+#         the output's own shape directly rather than resizing back up.
 
 # ImageNet mean/std, precomputed as pixel * scale + offset (equivalent to
 # (pixel - mean) / std but avoids a per-element division every frame).
@@ -71,8 +63,7 @@ class DepthAnythingInference(ONNXInferenceManager):
 	def preprocess(self, nA):
 		"""Preprocess input for Depth Anything V2. Input nA is float32 RGBA 0-1 from
 		TouchDesigner (bottom-up). ImageNet-normalizes directly from that 0-1 range --
-		no intermediate 0-255 step needed, unlike the other depth models the old script
-		also supported."""
+		no intermediate 0-255 step needed."""
 		h, w = nA.shape[:2]
 		num_channels = nA.shape[2] if len(nA.shape) == 3 else 1
 

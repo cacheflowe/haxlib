@@ -13,21 +13,16 @@ ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 KeypointTracker = object_tracker.KeypointTracker
 
 # ==================== MODEL OUTPUT FORMAT ====================
-# movenet-multipose-lightning.onnx (Google's TF Lite export). Confirmed by inspecting
-# the model's own get_inputs()/get_outputs():
+# movenet-multipose-lightning.onnx (Google's TF Lite export):
 #   input:  'input' (1, H, W, 3) INT32, plain 0-255 pixel values, NHWC -- NOT the NCHW
 #           float32 (optionally ImageNet-normalized) tensor every other script in this
 #           project builds. No resizing done here; assumes TD has already resized
 #           input upstream (fit_square_sm), same convention as every other model.
 #   output: 'output_0' (1, 6, 56) float32 -- 6 FIXED candidate person slots (unlike
-#           YOLO26/RF-DETR, this is not sorted-by-confidence and has no built-in NMS.
-#           A box-IoU NMS pass was tried here initially (matching onnx_yolo26_pose.py's
-#           pattern) but REMOVED -- see KeypointTracker's own docstring for why: it made a
-#           permanent, irreversible detection-loss decision using the same box signal
-#           KeypointTracker was specifically introduced to stop trusting, and it was
-#           redundant with KeypointTracker's own keypoint-distance duplicate
-#           suppression anyway (a strictly more reliable signal for "same person,
-#           duplicate slot" vs. "two different people standing close").
+#           YOLO26/RF-DETR, this is not sorted-by-confidence and has no built-in NMS).
+#           A box-IoU NMS pass was tried and removed -- redundant with, and less
+#           reliable than, KeypointTracker's own keypoint-distance duplicate
+#           suppression (see that class's docstring).
 #   Per-candidate row layout (56 values):
 #     [0:51]  17 keypoints x (y, x, score) triples -- NOTE y-before-x, unlike every
 #             other model in this project (x, y, conf) -- reordered in postprocess().
@@ -37,18 +32,13 @@ KeypointTracker = object_tracker.KeypointTracker
 #     [55]    overall person confidence.
 #
 # Ported from tox/haxlib/ml/onnx/MovenetONNX.py, an older script predating this
-# project's shared ONNXInferenceManager conventions. That script used a hand-rolled
-# slot-stable temporal tracker: greedy best-first KEYPOINT-DISTANCE matching across 6
-# fixed output slots, deliberately ignoring the box entirely. First ported straight to
-# ByteTracker (box-IoU + Kalman) for consistency with every other model's tracking --
-# confirmed live that ByteTrack's box-IoU matching genuinely struggled here (tracks
-# flickering/respawning) in a way the old tracker never did, root-caused to MoveNet's
-# box being DERIVED from keypoint extents rather than independently learned, so a
-# single flailing limb can swing its size/position around a lot frame to frame, and
-# box-IoU matching is directly exposed to that noise. Switched to
-# object_tracker.KeypointTracker (keypoint-distance matching, generalized off the old
-# script's fixed-slot design onto this project's unbounded-track_id convention) as a
-# result -- see that class's docstring for the full rationale.
+# project's shared ONNXInferenceManager conventions. Uses object_tracker.KeypointTracker
+# (keypoint-distance matching) instead of ByteTracker (box-IoU matching, used by every
+# other model here) because MoveNet's box is DERIVED from keypoint extents rather than
+# independently learned, so a flailing limb can swing box size/position around enough
+# to make box-IoU matching noisy -- see KeypointTracker's docstring for the full
+# rationale. See Round 9 in td-threaded-inference-optimization.md for the detailed
+# comparison investigation against the legacy script.
 KEYPOINT_NAMES = [
 	'nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear',
 	'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
@@ -92,14 +82,11 @@ HAND_EXTENSION = 0.45
 # ==================== CONFIGURATION ====================
 MODEL_FILENAME = 'movenet-multipose-lightning.onnx'
 
-# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). Confirmed
-# live that MoveNet's real person-confidence signal for this scene sits in a genuinely
-# low band -- raising this at all starts dropping real, well-tracked poses -- so this
-# isn't a "normal-range" default so much as a starting point tuned the same way
-# onnx_yolo26_pose.py's CONF_THRESHOLD was: against the real observed distribution, not
-# a documentation-typical value. (An earlier stale 0.005, copy-pasted from YOLO26_POSE's
-# own scene-specific tuning when this comp was cloned, has already been replaced once --
-# see git history -- this value is the second, better-informed pass.)
+# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). MoveNet's
+# real person-confidence signal for this scene sits in a genuinely low band -- raising
+# this at all starts dropping real, well-tracked poses -- so this is tuned against the
+# observed distribution rather than a documentation-typical value, same approach as
+# onnx_yolo26_pose.py's CONF_THRESHOLD.
 CONF_THRESHOLD = 0.1
 
 # Tracker: max frames to keep a lost track alive.
@@ -284,17 +271,11 @@ class MoveNetPoseInference(ONNXInferenceManager):
 		self._cached_output_name = outputs[0].name
 
 	def run_inference(self, input_tensor):
-		"""Matches the old MovenetONNX.py's _inferenceThread() call shape exactly
-		(input/output names cached once at load time in on_model_loaded(), explicit
-		single-output-name list) instead of the base class default's per-call
-		self.session.get_inputs()[0].name lookup and output_names=None (return-
-		everything). Tested live as a candidate explanation for this model's measured
-		~2x inference-time gap vs the old script at the identical resolution --
-		inconclusive (10.9-15.2ms across several samples, overlapping the pre-change
-		13-17ms range too much to call a real fix), so the raw gap is still
-		unexplained. Kept anyway since it's strictly no worse and slightly cheaper per
-		call (no repeated metadata lookup) -- see td-threaded-inference-optimization.md's
-		Round 9 for the fuller investigation."""
+		"""Caches input/output names at load time and passes an explicit single output
+		name, instead of the base class default's per-call name lookup and
+		output_names=None. Strictly no worse and slightly cheaper per call, but does not
+		fully explain this model's slower session.run() vs the legacy script -- see
+		Round 9 in td-threaded-inference-optimization.md."""
 		return self.session.run([self._cached_output_name], {self._cached_input_name: input_tensor})
 
 	def preprocess(self, nA):
@@ -470,9 +451,7 @@ class MoveNetPoseInference(ONNXInferenceManager):
 		"""Flush table_output/table_joints/table_bones from tracked_objects right after
 		this frame's texture publishes, BEFORE the next frame's capture/dispatch -- see
 		the base class's on_result_published() docstring for why this replaces the older
-		pending_table_update-flag-checked-by-the-wrapper pattern. Matches
-		tox/haxlib/ml/onnx/MovenetONNX.py's OutputSkeletonsToChop(), which ran immediately
-		after consuming a result in the same call, not after dispatching the next one."""
+		pending_table_update-flag-checked-by-the-wrapper pattern (see Round 9)."""
 		self.write_tracks_to_table()
 		self.write_joints_bones_to_tables()
 

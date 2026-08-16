@@ -21,9 +21,9 @@ ONNXInferenceManager = onnx_inference_manager.ONNXInferenceManager
 # machinery this script adds to the shared ONNXInferenceManager base class.
 MODEL_FILENAME = 'rvm_mobilenetv3_fp32.onnx'
 
-# Confirmed live (session.get_inputs()/get_outputs() against the real file):
+# Model I/O (per session.get_inputs()/get_outputs()):
 #   inputs:  src [B,3,H,W] float32, r1i/r2i/r3i/r4i [B,C,H,W] float32 (C=16/20/40/64,
-#            confirmed via r1o..r4o's output shapes -- dynamic dims mean ORT itself
+#            only visible via r1o..r4o's output shapes -- dynamic dims mean ORT itself
 #            doesn't expose these numbers up front), downsample_ratio [1] float32
 #   outputs: fgr [B,3,H,W], pha [B,1,H,W], r1o/r2o/r3o/r4o (next frame's r1i..r4i)
 # Every tensor in this export is float32 (the "fp32" in the filename) -- unlike RVM's
@@ -55,9 +55,8 @@ OUTPUT_MODE = 'rgba'
 # Multiply RGB by alpha before output (RGBA Cutout mode only). RVM's raw fgr is straight
 # (unpremultiplied) color; TD's own compositing (Over TOP, Composite TOP, etc.) generally
 # expects premultiplied alpha, and feeding it straight color produces a visible edge
-# mismatch -- confirmed live, matching exactly what a downstream Math TOP set to
-# "Pre-Multiply RGB by Alpha" fixes after the fact. On by default so the output composites
-# correctly with standard TD nodes with no extra step required.
+# mismatch. On by default so the output composites correctly with standard TD nodes with
+# no extra step required.
 PREMULTIPLY_ALPHA = True
 
 
@@ -82,18 +81,9 @@ class RVMMattingInference(ONNXInferenceManager):
 
 	def __init__(self):
 		super().__init__()
-		# Tried self.numpy_array_delayed = False here (same override that won big for
-		# onnx_rfdetr_seg.py -- dropped that network's Framedelay from 6 to 3 frames).
-		# First measurement showed a ~660ms inference spike, but that turned out to be a
-		# confound (Downsampleratio had been left at 1.0 from unrelated live testing) --
-		# after fixing that back to 0.25 and re-testing cleanly, numpy_array_delayed=False
-		# STILL measured a real, repeatable regression here: ~90-120ms/inference vs.
-		# ~6-15ms with the default delayed=True, at the same resolution/downsample_ratio.
-		# Root cause not fully confirmed, but the leading theory is GPU contention: this
-		# script's forced CPU/GPU sync stall interacting badly with everything else this
-		# live show has running on the same GPU, in a way RF-DETR's lighter working
-		# resolution didn't trigger. Left at the base class default (True) -- do not flip
-		# this again without a clean re-measurement (isolate from other par changes).
+		# numpy_array_delayed=False regressed inference time here even though it helped
+		# onnx_rfdetr_seg.py -- see Round 2 in td-threaded-inference-optimization.md. Left
+		# at the base class default (True); don't flip without re-measuring cleanly.
 		self.opOutputTableDAT = parent().op('table_output')
 		# CUDA-resident recurrent state -- (re)initialized in on_model_loaded() and by the
 		# Resetstate pulse. None until a session exists (OrtValue needs a CUDA context).
@@ -180,28 +170,22 @@ class RVMMattingInference(ONNXInferenceManager):
 			self.printONNX(f"  input name='{inp.name}' shape={inp.shape} type={inp.type}")
 		self.check_providers(session)
 
-		# The base class (_load_model_thread) calls on_model_loaded(session) BEFORE it
-		# assigns self.session = session -- so self.session is still None here.
-		# _recreate_io_binding() uses self.session (needed since it's also called later
-		# from run_inference(), where the `session` parameter isn't available), so set it
-		# now; harmless, the base class assigns the same object again right after this
-		# returns.
+		# The base class calls on_model_loaded(session) BEFORE assigning self.session, so
+		# self.session is still None here -- set it early since _recreate_io_binding() needs
+		# self.session (it's also called later from run_inference(), which has no `session`
+		# param). See Round 4 in td-threaded-inference-optimization.md.
 		self.session = session
 		self._recreate_io_binding()
 
 	def _recreate_io_binding(self):
 		"""(Re)build the IOBinding's output bindings AND reset recurrent state together.
 
-		Confirmed live that resetting recurrent state alone isn't enough to recover from
-		a LARGE resolution change (e.g. tuning Inputwidth from 312 to 960) -- the
-		fgr/pha/r1o-r4o output bindings themselves (bound once at load via bind_output(),
-		no explicit shape) got stuck erroring on every frame after such a change, and only
-		a fresh io_binding() (this method, originally only called from on_model_loaded())
-		recovered cleanly. A same-scale aspect-ratio-only change between video clips
-		(e.g. 312x175 -> 312x234) was fine with just a recurrent-state reset -- but since
-		there's no cheap way to tell "small aspect shift" from "large resolution change"
-		apart, and recreating an io_binding is cheap, always do both together on any
-		detected shape change rather than trying to distinguish the two cases."""
+		A recurrent-state reset alone isn't enough to recover from a large resolution
+		change -- the output bindings themselves (bound once at load, no explicit shape)
+		get stuck erroring every frame after that. Recreating the io_binding is cheap and
+		there's no reliable way to tell a small aspect change from a large resolution
+		change apart, so always do both together. See Round 4 in
+		td-threaded-inference-optimization.md."""
 		self._io_binding = self.session.io_binding()
 		for name in ['fgr', 'pha'] + RECURRENT_OUTPUT_NAMES:
 			self._io_binding.bind_output(name, 'cuda')
@@ -230,16 +214,12 @@ class RVMMattingInference(ONNXInferenceManager):
 		needed = (1, 3, self.original_h, self.original_w)
 		if self._input_buf_shape != needed:
 			# A resolution change means the recurrent state's per-stage spatial shapes no
-			# longer match what THIS resolution's feature maps need -- confirmed live as a
-			# real crash, not a hypothetical: "Expand_174: right operand cannot broadcast
-			# on dim 2 LeftShape: {1,64,5,5}, RightShape: {1,64,3,5}" the first frame after
-			# a resolution change. This isn't just a one-off dev-time hazard -- this
-			# network's source is a switch1 cycling between video clips of DIFFERENT
-			# aspect ratios, so a live source switch mid-session hits this exact path.
-			# Request a reset unconditionally on any shape change (including the very
-			# first real frame, where it's a harmless no-op since on_model_loaded()
-			# already started fresh) rather than relying solely on the manual Resetstate
-			# pulse for this specific case.
+			# longer match what this resolution's feature maps need, which crashes on the
+			# next inference (see Round 4 in td-threaded-inference-optimization.md). This
+			# network's source is a switch1 cycling between clips of different aspect
+			# ratios, so a live source switch hits this path routinely -- request a reset
+			# unconditionally on any shape change (including the harmless first-frame case)
+			# rather than relying solely on the manual Resetstate pulse.
 			if self._input_buf_shape is not None:
 				self._reset_state_requested = True
 			self._input_tensor_buf = np.empty(needed, dtype=np.float32)
@@ -256,12 +236,11 @@ class RVMMattingInference(ONNXInferenceManager):
 		self._input_tensor_buf[0, 2] = flipped[:, :, 2]
 
 		# Read the Downsampleratio par HERE, on the main thread -- NOT inside
-		# run_inference(), which runs on the persistent worker thread (see
-		# onnx_inference_manager.py's _worker_loop()). Reading a TD par from a background
-		# thread is exactly the kind of TD-object access that's forbidden (see
-		# .ai/skills/td-threading.md) and caused a real crash during development here --
-		# stash the plain float value now so run_inference() only ever touches an
-		# ordinary Python attribute, never self.scriptOp, from the worker thread.
+		# run_inference(), which runs on the persistent worker thread. Reading a TD par
+		# from a background thread crashes TD (see Round 3 in
+		# td-threaded-inference-optimization.md) -- stash the plain float value now so
+		# run_inference() only ever touches an ordinary Python attribute, never
+		# self.scriptOp, from the worker thread.
 		self._current_downsample_ratio = np.array(
 			[self._par_or_default('Downsampleratio', DOWNSAMPLE_RATIO)], dtype=np.float32
 		)
@@ -302,15 +281,12 @@ class RVMMattingInference(ONNXInferenceManager):
 			fgr_ov, pha_ov, *self._rec = bind_and_run()
 		except RuntimeError as e:
 			# Recurrent state (and, for a large enough resolution change, the io_binding's
-			# own output bindings -- see _recreate_io_binding()'s docstring) carry shape
-			# assumptions tied to whatever resolution/downsample_ratio produced them. Seen
-			# live: a shape mismatch (e.g. "{1,64,3,5}" vs "{1,64,4,5}") even between two
-			# consecutive frames at an UNCHANGED input resolution -- rounding in RVM's own
-			# internal downsample step is evidently not perfectly stable frame to frame for
-			# some resolution/downsample_ratio combinations. Rather than let this wedge the
-			# pipeline in a repeating error loop (confirmed live: it does, every single
-			# frame, once it starts), self-heal by recreating the io_binding + resetting to
-			# the broadcastable zero state and retrying once -- a dropped/reset frame of
+			# own output bindings) carry shape assumptions tied to whatever
+			# resolution/downsample_ratio produced them, and can mismatch even between
+			# consecutive frames at an unchanged resolution -- see Round 4 in
+			# td-threaded-inference-optimization.md. Self-heal by recreating the io_binding
+			# and resetting to the broadcastable zero state, then retrying once, rather than
+			# leaving the pipeline wedged in a repeating error loop -- a dropped frame of
 			# temporal consistency is a much smaller cost than a stuck, erroring script.
 			self._last_error = str(e)  # plain attribute, safe to inspect cross-thread
 			self.printONNX(f"Inference shape mismatch, recreating io_binding and retrying: {e}")

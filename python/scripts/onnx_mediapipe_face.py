@@ -21,29 +21,23 @@ _track_color = object_tracker.track_color
 # face DETECTION runs through the normal threaded ONNXInferenceManager pipeline; per-face
 # LANDMARK inference runs synchronously on the main thread inside postprocess(), batched
 # across every currently-tracked face into one call (same MAX_BATCH_FACES fixed-size-
-# padding trick as onnx_hsemotion.py -- see that script / the "Round 5" writeup in
+# padding trick as onnx_hsemotion.py -- see Round 5 in
 # .ai/skills/td-threaded-inference-optimization.md for why a varying batch size is a
 # severe ORT performance trap, not just a correctness nicety).
 DETECTOR_MODEL_FILENAME = 'face_detector.onnx'
 LANDMARK_MODEL_FILENAME = 'face_landmark_detector.onnx'
 
 # ---- BlazeFace anchor generation ----
-# Confirmed against MediaPipe's OWN source (not guessed):
-#   mediapipe/modules/face_detection/face_detection.pbtxt (SsdAnchorsCalculatorOptions):
-#     min_scale=0.1484375, max_scale=0.75, anchor_offset=0.5, aspect_ratios=[1.0],
-#     fixed_anchor_size=true (anchor w/h always 1.0 -- box decode relies entirely on the
-#     x/y/w/h_scale below, not the anchor's own size)
-#   mediapipe/modules/face_detection/face_detection_short_range.pbtxt (FaceDetectionOptions):
-#     num_layers=4, strides=[8,16,16,16] @ 128x128 input, num_boxes=896,
-#     interpolated_scale_aspect_ratio=1.0, x/y/w/h_scale=128.0
-# This export uses 256x256 (2x) with num_boxes=896 CONFIRMED IDENTICAL live -- the anchor
-# grid topology is resolution-independent (normalized 0-1 coordinates), so strides/scale
-# just scale proportionally with input size (128->256 doubles both). Regenerated
-# automatically if Inputwidth ever changes (see preprocess()'s shape-change handling).
-# GenerateAnchors() itself (mediapipe/calculators/tflite/ssd_anchors_calculator.cc) merges
-# CONSECUTIVE layers sharing the same stride into one group before computing feature-map
-# size -- verified live this produces exactly 896 anchors (512 @ stride-1 grid x2 anchors,
-#384 @ stride-2 grid x6 anchors from the 3 merged layers).
+# Params match MediaPipe's own SsdAnchorsCalculatorOptions/FaceDetectionOptions
+# (mediapipe/modules/face_detection/{face_detection,face_detection_short_range}.pbtxt):
+# fixed_anchor_size=true (anchor w/h always 1.0 -- box decode relies entirely on the
+# x/y/w/h_scale below, not the anchor's own size), num_layers=4, strides=[8,16,16,16] @
+# 128x128 input, num_boxes=896. This export uses 256x256 (2x); the anchor grid topology is
+# resolution-independent (normalized 0-1 coordinates), so strides/scale just scale
+# proportionally with input size. Regenerated automatically if Inputwidth ever changes
+# (see preprocess()'s shape-change handling). GenerateAnchors() itself
+# (mediapipe/calculators/tflite/ssd_anchors_calculator.cc) merges CONSECUTIVE layers
+# sharing the same stride into one group before computing feature-map size.
 NUM_LAYERS = 4
 BASE_STRIDES = [8, 16, 16, 16]     # at the model's native 128x128; scaled by preprocess()
 MIN_SCALE = 0.1484375
@@ -54,14 +48,12 @@ INTERPOLATED_SCALE_ASPECT_RATIO = 1.0
 NUM_KEYPOINTS = 6  # right_eye, left_eye, nose_tip, mouth, right_ear, left_ear
 
 # ---- Rotation-aligned ROI (for the landmark model) ----
-# Confirmed against mediapipe/modules/face_landmark/face_detection_front_detection_to_roi.pbtxt:
-# rotation computed from keypoint 0 -> keypoint 1 (the two eyes) so the eye line becomes
+# Per mediapipe/modules/face_landmark/face_detection_front_detection_to_roi.pbtxt: rotation
+# is computed from keypoint 0 -> keypoint 1 (the two eyes) so the eye line becomes
 # horizontal (target_angle=0), then RectTransformationCalculator expands the box by
-# ROI_SCALE in both dimensions and forces it square (using the longer side). Confirmed
-# live via a synthetic round-trip (a real face's aligned crop + its 468 landmarks were
-# visually inspected: correct anatomical mesh shape, right-side-up, not mirrored) that
-# 1.5 (MediaPipe's own default) crops the chin slightly; 2.0 gives comfortable margin
-# with no correctness difference, just framing -- used here.
+# ROI_SCALE in both dimensions and forces it square (using the longer side). MediaPipe's
+# own default (1.5) crops the chin slightly; 2.0 gives comfortable margin with no
+# correctness difference, just framing -- used here.
 ROI_SCALE = 2.0
 LANDMARK_INPUT_SIZE = 192
 NUM_LANDMARKS = 468
@@ -134,19 +126,17 @@ def _generate_anchors(input_size, strides):
 # Poseyawscale/Posepitchscale/Posefocalscale/Posesmoothing pars, yaw/pitch/roll columns
 # appended to table_output in degrees) -- ported here because FaceMesh's 468 landmarks
 # give a much richer, better-distributed correspondence set than YuNet's 5 sparse
-# keypoints, which is specifically what YuNet's own solvepnp method struggled with
-# live (an ill-conditioned 6-DOF solve over only 5 near-planar points, jittery enough
-# that the geometric ratio heuristic won out as the default there). With 6 points
-# spread across the FULL face (forehead-to-chin span via the chin point, ear-to-ear
-# span via the eye/mouth corners) instead of a small cluster, the same solvePnP
-# approach should condition far better -- worth defaulting to POSE_METHOD='solvepnp'
-# here rather than 'geometric', unlike YuNet's default.
+# keypoints. YuNet's solvePnP over just 5 near-planar points is an ill-conditioned solve,
+# jittery enough that geometric ratios won out as the default there; FaceMesh's 6 pose
+# points span the FULL face (forehead-to-chin via the chin point, ear-to-ear via the
+# eye/mouth corners), which conditions solvePnP much better -- so POSE_METHOD defaults
+# to 'solvepnp' here, unlike YuNet's default.
 #
 # Landmark indices below are MediaPipe FaceMesh's own well-known canonical layout
 # (the same 6-point nose/chin/eye-corners/mouth-corners set used across most
 # MediaPipe-based head-pose tutorials/repos) -- FaceMesh's own point ORDER is model-
-# defined and consistent frame to frame, not something this script controls, so these
-# indices are stable regardless of which face is tracked.
+# defined and consistent frame to frame, so these indices are stable regardless of which
+# face is tracked.
 POSE_NOSE_TIP = 1
 POSE_CHIN = 152
 POSE_EYE_R = 33     # outer corner, one side (see _HEAD_MODEL_POINTS -- L/R naming is
@@ -165,12 +155,11 @@ POSE_SMOOTHING = 0.5
 # Rough canonical 3D face model (average adult proportions, not subject-specific --
 # solvePnP only needs plausible relative proportions to recover orientation, not exact
 # measurements), matched 1:1 against POSE_LANDMARK_INDICES above. Y-DOWN convention
-# (X=right, Y=down, Z=away from camera) -- same as onnx_yunet.py's own model, and for
-# the same reason: with Y-up, an identity rotation (the solver's initial "facing the
-# camera" guess) maps model-space straight onto camera-space in a way that actually
-# corresponds to upside-down, systematically pulling the solve toward a ~180-degree-
-# pitch local optimum. Adapted from the classic 6-point head-pose model (nose tip,
-# chin, eye corners, mouth corners) used widely in OpenCV solvePnP head-pose tutorials.
+# (X=right, Y=down, Z=away from camera) -- same as onnx_yunet.py's own model: with Y-up,
+# the solver's identity-rotation initial guess would map model-space onto camera-space
+# upside-down, pulling the solve toward a spurious ~180-degree-pitch local optimum.
+# Adapted from the classic 6-point head-pose model (nose tip, chin, eye corners, mouth
+# corners) used widely in OpenCV solvePnP head-pose tutorials.
 _HEAD_MODEL_POINTS = np.array([
 	(   0.0,    0.0,    0.0),  # nose tip (most forward point -- the origin)
 	(   0.0,  330.0,  -65.0),  # chin
@@ -201,10 +190,9 @@ def _compute_head_direction_geometric(pose_pts, yaw_scale=340.0, pitch_scale=100
 	"""Estimate head yaw/pitch/roll from keypoint GEOMETRY directly, no 3D model or
 	solver involved -- same bounded-distance-ratio heuristic as onnx_yunet.py's
 	identical function, just fed FaceMesh's 6 pose landmarks (native/pre-TD-flip pixel
-	coords) instead of YuNet's 5. Kept for output-scheme parity / as a fallback --
-	solvepnp (POSE_METHOD's default here) should be materially more stable than
-	onnx_yunet.py's own version of this tradeoff, given the much wider, better-
-	distributed point spread FaceMesh provides.
+	coords) instead of YuNet's 5. Kept for output-scheme parity / as a fallback;
+	solvepnp (POSE_METHOD's default here) is the more stable option given FaceMesh's
+	wider point spread.
 
 	pose_pts: dict with keys 'nose', 'chin', 'eye_r', 'eye_l', 'mouth_r', 'mouth_l',
 	each a (x, y) pixel-space pair (native/pre-TD-flip orientation)."""
@@ -239,9 +227,8 @@ def _compute_head_direction_solvepnp(pose_pts, width, height, focal_scale=1.0):
 	Identical approach/API to onnx_yunet.py's own solvepnp function -- see that
 	docstring for the full reasoning (focal_scale, the ITERATIVE+explicit-guess choice
 	to avoid the near-planar flip ambiguity, yaw/pitch/roll axis meaning). The one
-	difference: this uses 6 points spread across the WHOLE face (forehead-to-chin span
-	via the chin point, ear-to-ear span via the eye/mouth corners) rather than 5 points
-	clustered in the eye/nose/mouth region, which should condition the solve better.
+	difference: this uses 6 points spread across the WHOLE face rather than 5 points
+	clustered in the eye/nose/mouth region, which conditions the solve better.
 
 	pose_pts: same dict shape as _compute_head_direction_geometric, but in TRUE-FRAME
 	pixel coordinates (width x height), NOT the square working buffer -- consistent
@@ -277,13 +264,8 @@ def _compute_head_direction_solvepnp(pose_pts, width, height, focal_scale=1.0):
 
 	rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
 	pitch, yaw, roll = _rotation_matrix_to_euler(rotation_matrix)
-	# pitch AND roll negated -- both confirmed backwards live (pitch: nodding down read
-	# as positive instead of negative; roll: ear-to-shoulder tilt came out inverted too).
-	# onnx_yunet.py's own geometric method had an explicit, separately-confirmed sign
-	# flip for pitch for this same reason; its solvepnp path (this same
-	# _rotation_matrix_to_euler convention, just ported here) was kept available there
-	# but never the default, so neither of these signs was ever actually validated
-	# against a real rig until now. yaw has NOT been reported backwards -- left as-is.
+	# pitch and roll both need negating to match expected sign (nodding down should read
+	# negative, not positive; same for tilt) -- yaw does not.
 	return math.degrees(yaw), -math.degrees(pitch), -math.degrees(roll)
 
 
@@ -296,15 +278,15 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 	mirrors, and MAX_BATCH_FACES's comment for why the secondary batch is padded to a
 	fixed size.
 
-	The landmark stage here is meaningfully more involved than HSEmotion's straight
-	axis-aligned crop: MediaPipe's own accuracy depends on a ROTATION-ALIGNED crop (using
-	the two eye keypoints to un-rotate the face before landmarking, not just an
-	axis-aligned box crop+resize) -- see ROI_SCALE's comment block. Each tracked face gets
-	its own affine transform; postprocess() extracts each face's own 192x192 aligned crop
-	via cv2.warpAffine, batches them all into one landmark-model call, then maps each
-	face's 468 output landmarks back through the INVERSE of that same per-face affine into
-	original-frame normalized coordinates -- landmarks stored on tracked_objects are
-	always in that original-frame space, never the arbitrary per-face aligned-crop space.
+	The landmark stage here is more involved than HSEmotion's straight axis-aligned crop:
+	MediaPipe's own accuracy depends on a ROTATION-ALIGNED crop (using the two eye
+	keypoints to un-rotate the face before landmarking) -- see ROI_SCALE's comment block.
+	Each tracked face gets its own affine transform; postprocess() extracts each face's
+	own 192x192 aligned crop via cv2.warpAffine, batches them into one landmark-model
+	call, then maps each face's 468 output landmarks back through the INVERSE of that
+	same affine into original-frame normalized coordinates -- landmarks stored on
+	tracked_objects are always in that original-frame space, never the per-face
+	aligned-crop space.
 	"""
 
 	def __init__(self):
@@ -637,27 +619,16 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 			scores_valid = scores_valid[keep]
 			kps_valid = kps_valid[keep]
 
-		# Isotropic box-SIZE correction -- confirmed live (many consecutive detections)
-		# that this model's box regression ALWAYS outputs w_raw==h_raw in square-buffer
-		# terms (fixed_anchor_size=true couples them to a single implicit "scale" concept,
-		# not two independent dimensions -- i.e. the model assumes/produces a roughly
-		# SQUARE box in its own square input space). Naively reprojecting that square
-		# square-space box by multiplying width by true_w and height by true_h
-		# independently (mathematically valid for POSITION, which fraction-of-square ==
-		# fraction-of-true-frame for under fit_square_sm's per-axis 'fill' stretch) bakes
-		# the TRUE FRAME's own aspect ratio into every single box, since w_fraction ==
-		# h_fraction by the model's own construction -- e.g. a detection with
-		# w=h=0.1633 in square terms reprojects to 104.5x58.8px on a 640x360 frame, an
-		# exact 1.778:1 (== the frame's own aspect) ratio regardless of the real face's
-		# actual shape. Unlike the landmark rotation bug (a pure coordinate-transform
-		# error, exactly fixable), this is the model's own architectural bias interacting
-		# with the anisotropic stretch -- there's no way to recover the "true" width vs
-		# height independently, only to stop compounding the bias with the frame's own
-		# aspect. Fix: treat the model's single size value as an ISOTROPIC true-pixel
-		# size (same absolute pixel size on both axes), then re-express as a fraction of
-		# each axis's own true dimension -- this is what keeps the RENDERED box looking
-		# proportioned like a real, non-stretched detection instead of inheriting
-		# whatever aspect ratio the source frame happens to have.
+		# Isotropic box-SIZE correction (see Bug 3 in
+		# docs/learnings/debug-comp-camera-aspect.md). This model's fixed_anchor_size=true
+		# box regression always outputs w_raw==h_raw in square-buffer terms, i.e. it
+		# assumes a square box in its own square input space. Naively reprojecting that by
+		# multiplying width by true_w and height by true_h independently is valid for
+		# POSITION (fraction-of-square == fraction-of-true-frame under fit_square_sm's
+		# 'fill' stretch) but bakes the true frame's own aspect ratio into every box's
+		# SIZE, since w_fraction == h_fraction by construction. Fix: treat the model's
+		# single size value as an ISOTROPIC true-pixel size (same absolute pixel size on
+		# both axes), then re-express as a fraction of each axis's own true dimension.
 		box_w_sq = boxes_native[:, 2] - boxes_native[:, 0]
 		box_h_sq = boxes_native[:, 3] - boxes_native[:, 1]
 		box_cx_sq = (boxes_native[:, 0] + boxes_native[:, 2]) / 2
@@ -811,37 +782,22 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 		"""Extract each confirmed face's own rotation-aligned crop (via its own affine
 		transform, using the eye keypoints -- see class docstring) and run the landmark
 		model once per face. Unlike HSEmotion's emotion classifier, face_landmark_detector
-		.onnx has a FIXED batch-1 input ([1,3,192,192] -- confirmed via metadata.json and
-		a live INVALID_ARGUMENT error when a stacked (N,3,192,192) batch was tried), so
-		there's no MAX_BATCH_FACES-style padding to do here -- every call uses the exact
-		same shape regardless of face count, so ORT's CUDA algorithm-search cache (see
-		MAX_BATCH_FACES's own comment / HSEmotion Round 5) is never invalidated in the
-		first place. Each face's 468 output landmarks are mapped back through the INVERSE
-		of its own affine into original-frame TD-space normalized coordinates. Returns a
-		list the same length as `confirmed`, each either a (468,3) array or None.
+		.onnx has a FIXED batch-1 input ([1,3,192,192]), so there's no MAX_BATCH_FACES-style
+		padding to do here -- every call uses the exact same shape regardless of face count,
+		so ORT's CUDA algorithm-search cache (see MAX_BATCH_FACES's own comment / Round 5 in
+		.ai/skills/td-threaded-inference-optimization.md) is never invalidated in the first
+		place. Each face's 468 output landmarks are mapped back through the INVERSE of its
+		own affine into original-frame TD-space normalized coordinates. Returns a list the
+		same length as `confirmed`, each either a (468,3) array or None.
 
 		IMPORTANT -- works in TRUE (pre-square) pixel units for the rotation/scale/center
 		math, not the square working buffer's own pixel units. `fit_square_sm`'s 'fill'
-		stretch is a per-axis-uniform (but cross-axis DIFFERENT) scale, e.g. scale_x=
-		square_w/true_w, scale_y=square_h/true_h -- for a plain axis-aligned POSITION, a
-		fraction computed in square-space exactly equals the same fraction in true-space
-		(the two per-axis scales cancel out of the ratio), so the box center needs no
-		correction. SIZE is different -- see the isotropic box-size fix below (Bug 3 in
-		docs/learnings/debug-comp-camera-aspect.md): this detector's box regression always
-		outputs width_fraction == height_fraction in square-space (fixed_anchor_size), so
-		naively multiplying each by its own true dimension would inflate whichever axis
-		the source frame is wider on, oversizing the crop (a smaller-than-intended face
-		within the landmark model's input, plausibly reading as "landmarks scaled up").
-		The ROTATION step ALSO does NOT have the fraction-preservation property: rotating
-		within an ANISOTROPICALLY stretched pixel grid (scale_x !=
-		scale_y) is not the same transform as rotating in the true, undistorted frame --
-		it introduces real shear. Confirmed live: with the naive square-pixel-space
-		version of this method, the cv2 debug overlay (drawn directly onto the square
-		working buffer) looked anatomically correct, while the SAME landmark data,
-		instanced via the Debug COMP onto the true-aspect (640x360) canvas, showed a
-		mesh clearly wider than its own detection box -- exactly the shear this
-		square-space rotation introduces, made visible by the aspect mismatch between the
-		square buffer and the true frame. See docs/learnings/debug-comp-camera-aspect.md.
+		stretch is a per-axis scale that differs between axes, so a fraction computed in
+		square-space equals the same fraction in true-space for POSITION (the per-axis
+		scales cancel out of the ratio), but not for SIZE or ROTATION -- see Bugs 2 and 3
+		in docs/learnings/debug-comp-camera-aspect.md for the full derivation of why the
+		isotropic size fix below is needed and why rotating in the anisotropically
+		stretched square-pixel grid introduces real shear.
 
 		Fix: build the crop's rotation+scale+translate matrix entirely in TRUE-pixel
 		terms (correct rotation angle, correct box center/size), then compose it with the
@@ -875,15 +831,10 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 			eyes_native = c['eyes_native']
 			# box_native is a normalized SQUARE-space fraction; fraction-of-square ==
 			# fraction-of-true for plain axis-aligned POSITION, so the center is correct
-			# as-is. SIZE is different -- see onnx_mediapipe_face.py's Bug 3 (isotropic
-			# box-size bias): this detector's box regression always outputs
-			# width_fraction == height_fraction in square-space (fixed_anchor_size), so
-			# naively multiplying by true_w/true_h independently here would inflate
-			# whichever axis the source frame is WIDER on (e.g. ~33% oversized for a
-			# 640x360 frame) -- a crop that's too zoomed-out relative to what the
-			# landmark model expects, which plausibly reads as "landmarks scaled up
-			# relative to the real face" once the model runs on an out-of-spec crop.
-			# Use the same isotropic true-pixel size as the output-facing box fix.
+			# as-is. SIZE needs the same isotropic true-pixel correction as the
+			# output-facing box fix above (Bug 3 in
+			# docs/learnings/debug-comp-camera-aspect.md) -- otherwise the crop would be
+			# oversized on whichever axis the source frame is wider on.
 			x1, y1, x2, y2 = box_native[0]*true_w, box_native[1]*true_h, box_native[2]*true_w, box_native[3]*true_h
 			box_cx, box_cy = (x1+x2)/2, (y1+y2)/2
 			box_w_sq_frac = box_native[2] - box_native[0]
@@ -923,13 +874,10 @@ class MediaPipeFaceInference(ONNXInferenceManager):
 
 			lmk_out = self._landmark_session.run(None, {'image': chw})
 			lm = lmk_out[1][0]  # (468, 3), x/y NORMALIZED 0-1 relative to the 192x192 crop
-			# (confirmed live: raw x/y range ~0.14-0.99, NOT pixel-range 0-192 -- a first
-			# version of this code treated raw x/y as crop-space pixels directly, which
-			# under-scaled every point by ~192x and collapsed all 468 landmarks into a
-			# single sub-pixel cluster near the crop's local origin after the inverse
-			# affine. z comes out already small/relative -- no unit info from MediaPipe's
-			# own docs on its exact scale, so it's left as raw model output, only flipped
-			# to match TD's coordinate handedness if ever needed.)
+			# (NOT pixel-range 0-192 -- must be multiplied by LANDMARK_INPUT_SIZE below
+			# before the inverse affine, or all 468 points collapse to a single sub-pixel
+			# cluster. z comes out already small/relative with no documented unit from
+			# MediaPipe, so it's left as raw model output.)
 
 			xy_crop = lm[:, :2] * LANDMARK_INPUT_SIZE  # normalized -> crop-space pixels
 			# A_inv maps crop-space pixels directly back to SQUARE-pixel space (since A

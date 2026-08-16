@@ -55,12 +55,10 @@ DISTANCE_KEYPOINT_INDICES = [
 # Only one pose variant is currently exported: 'yolo26n-pose'
 MODEL_VARIANT = 'yolo26s-pose'
 
-# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). Value
-# tuned live for this camera/scene, where real-signal confidence runs extremely low
-# (fractions of a percent) -- not a typical detector threshold. Previously also used as
-# ByteTracker's two-stage high/low recovery bounds (collapsed to one value there, see
-# git history) -- KeypointTracker (see below) has no such two-stage concept at all, so
-# this is now a plain single admission/display gate.
+# Confidence threshold for a detected person to be shown/tracked (0.0 - 1.0). Tuned live
+# for this camera/scene, where real-signal confidence runs extremely low (fractions of a
+# percent) -- not a typical detector threshold. KeypointTracker has no ByteTrack-style
+# two-stage high/low recovery band, so this is a single admission/display gate.
 CONF_THRESHOLD = 0.005
 
 # Tracker: max frames to keep a lost track alive. Tuned live: ~0.25s of grace at 60fps.
@@ -77,11 +75,10 @@ TRACKER_MIN_HITS = 3
 
 # Tracker: max summed keypoint distance (object_tracker.KeypointTracker, restricted to
 # DISTANCE_KEYPOINT_INDICES above) to accept a match between a track and a detection --
-# NOT a box IoU threshold. Switched from ByteTracker (box-IoU + Kalman) to KeypointTracker
-# (keypoint-distance) after onnx_movenet.py's port of the same switch showed materially
-# more stable tracking on that model -- see td-threaded-inference-optimization.md and
-# object_tracker.py's "POSE-SPECIFIC TRACKER" section for the full rationale. Starting
-# value carried over from onnx_movenet.py's own tuning; re-tune live against this scene.
+# NOT a box IoU threshold. This model uses KeypointTracker (keypoint-distance matching)
+# rather than box-IoU + Kalman tracking; see Round 9 in td-threaded-inference-optimization.md
+# and object_tracker.py's "POSE-SPECIFIC TRACKER" section for why. Starting value carried
+# over from onnx_movenet.py's own tuning; re-tune live against this scene.
 MAX_MATCH_DIST = 0.5
 
 # Fraction of MAX_MATCH_DIST used as the duplicate-detection suppression threshold --
@@ -91,24 +88,20 @@ DUP_DIST_FACTOR = 0.5
 
 # Minimum box width/height (normalized 0-1, fraction of frame dimension) for a detection
 # to be kept at all -- applied alongside Confthreshold, before NMS/tracking. A tiny,
-# degenerate box is almost never a real person regardless of its confidence score; with
-# thresholds tuned this permissive for this scene, a size floor catches noise that a
-# confidence threshold alone lets through. Separate width/height floors, NOT one shared
-# value applied to both axes -- a standing person's box is naturally much narrower than
-# tall (~0.4-0.6 width/height is typical), so a single threshold high enough to reject
-# small-on-both-axes noise blobs ends up demanding an unrealistically wide box, and
-# incorrectly rejects real, legitimately-tall people who are just proportionally narrow
-# (confirmed live: raising the old shared MIN_BOX_SIZE to filter noise was also cutting
-# real tracked people whose width sat well below their height). Tune independently.
+# degenerate box is almost never a real person regardless of confidence, so a size floor
+# catches noise a confidence threshold alone lets through. Separate width/height floors,
+# NOT one shared value: a standing person's box is naturally much narrower than tall
+# (~0.4-0.6 width/height is typical), so a single threshold high enough to reject
+# small-on-both-axes noise blobs also rejects real, legitimately-tall-but-narrow people.
+# Tune independently.
 MIN_BOX_WIDTH = 0.02
 MIN_BOX_HEIGHT = 0.02
 
 # Smoothing factor for keypoint AND box position lerp -- used for both the debug draw
 # and the output table (0 = no smoothing, 1 = frozen). KeypointTracker holds the box at
 # its last-matched value with no damping of its own (see object_tracker.KeypointTrack's
-# docstring), so this is the ONLY smoothing applied to box position now, unlike the old
-# ByteTracker version where a separate Kalman filter handled box motion. Tuned live for
-# the keypoint case originally -- re-verify it still suits box motion too.
+# docstring), so this is the ONLY smoothing applied to box position. Tuned for the
+# keypoint case originally -- re-verify it still suits box motion too.
 OUTPUT_SMOOTHING = 0.23
 
 # Draw skeletons on the output image?
@@ -125,24 +118,19 @@ class YOLO26PoseInference(ONNXInferenceManager):
 	"""YOLO26 Pose Estimation inference with temporal tracking.
 
 	Targets the Ultralytics end2end (one-to-one trained) ONNX export: single output
-	tensor (1, 300, 57), pre-sorted by confidence, already NMS'd by the graph itself. A
-	SECOND, explicit box-IoU NMS pass here was tried and REMOVED -- see onnx_movenet.py's
-	module docstring for why: it makes a permanent, irreversible detection-loss decision
-	using the box signal, redundant with (and less reliable than) KeypointTracker's own
-	keypoint-distance duplicate suppression below.
+	tensor (1, 300, 57), pre-sorted by confidence, already NMS'd by the graph itself, so no
+	extra box-IoU NMS pass is applied here -- residual duplicates for the same person are
+	handled by KeypointTracker's own keypoint-distance duplicate suppression instead.
 
 	Tracking is split the same way ONNXInferenceManager splits model concerns:
 	`object_tracker.KeypointTracker` (shared across every keypoint-based ONNX script in
-	this project, see onnx_movenet.py's port for the full rationale on why keypoint-
-	distance matching beats box IoU for pose models) owns the generic tracking lifecycle
-	-- greedy keypoint-distance matching, track lifecycle, confidence decay. This class
-	only owns what's genuinely pose-specific: per-keypoint smoothing and the visibility
-	hysteresis, keyed by track_id in self._kpt_state since KeypointTracker itself doesn't
-	smooth anything (see its docstring). Keypoint visibility uses the same hold window as
-	track loss (Tracklossframes/track_buffer) rather than its own separate par -- a pose
-	can't sensibly outlive the track it belongs to, so a second, independently-tunable
-	"how long do keypoints survive" knob was pure redundancy once both were confirmed to
-	want the same value.
+	this project -- keypoint-distance matching beats box IoU for pose models, see Round 9
+	in td-threaded-inference-optimization.md) owns the generic tracking lifecycle: greedy
+	keypoint-distance matching, track lifecycle, confidence decay. This class only owns
+	what's genuinely pose-specific: per-keypoint smoothing and visibility hysteresis, keyed
+	by track_id in self._kpt_state since KeypointTracker itself doesn't smooth anything.
+	Keypoint visibility uses the same hold window as track loss (Tracklossframes/
+	track_buffer) rather than its own par, since a pose can't outlive the track it belongs to.
 	"""
 
 	def __init__(self):
@@ -153,11 +141,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		# whichever downstream COMP wants them (DebugSkeleton's geo_joints/geo_bones read
 		# them via its own In DATs, matching table_output -> input 0 -> in2). This script
 		# never reaches into a child COMP by path -- consumers pull data by wiring to this
-		# parent, the normal TD dependency-graph way. Replaces the old
-		# onnx_yolo26_pose_joints_chop.py/_bones_chop.py Script CHOP callbacks, which
-		# reached back into this module via a raw op(...).module reference outside TD's
-		# dependency graph; this keeps that logic here instead, computed straight from
-		# tracked_objects (see write_joints_bones_to_tables()).
+		# parent, the normal TD dependency-graph way (see write_joints_bones_to_tables()).
 		self.opJointsTableDAT = parent().op('table_joints')
 		self.opBonesTableDAT = parent().op('table_bones')
 		self.conf_threshold = CONF_THRESHOLD       # Will be overridden by custom par
@@ -329,10 +313,8 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		boxes_xyxy[:, 1], boxes_xyxy[:, 3] = 1.0 - boxes_xyxy[:, 3], 1.0 - boxes_xyxy[:, 1]
 		keypoints[:, :, 1] = 1.0 - keypoints[:, :, 1]
 
-		# No box-IoU NMS here -- see class docstring / onnx_movenet.py's module docstring
-		# for why it was tried and removed. This model's own end2end export already NMS's
-		# itself; any residual duplicates for the same person are handled downstream by
-		# KeypointTracker's own keypoint-distance duplicate suppression instead.
+		# No box-IoU NMS here -- see class docstring: this model's end2end export already
+		# NMS's itself, and residual duplicates are handled by KeypointTracker instead.
 
 		# Build detection list for the tracker. No detection-count cap here: KeypointTracker's
 		# max_tracks bounds worst-case track-count growth, and its greedy distance-sort
@@ -350,27 +332,22 @@ class YOLO26PoseInference(ONNXInferenceManager):
 
 		# Build structured data for CHOP/table output (filter out decayed tracks).
 		# active_ids covers every track the tracker is still maintaining, not just the
-		# ones cleared for display below -- a track kept alive via low-confidence
-		# recovery (score hovering just under Confthreshold) is still genuinely "alive"
-		# and must keep its keypoint-smoothing state; scoping active_ids to the
-		# display-filtered subset instead caused that state to be deleted and recreated
-		# from scratch every single frame for any such track, silently defeating its
-		# smoothing/hysteresis the whole time it sat near the threshold.
+		# ones cleared for display below -- a track kept alive via low-confidence recovery
+		# (score hovering just under Confthreshold) must keep its keypoint-smoothing state,
+		# so scoping this to the display-filtered subset would wipe and restart smoothing
+		# every frame for any such track.
 		active_ids = {t.track_id for t in active_tracks}
 		self.tracked_objects = []
 		for t in active_tracks:
-			# t.confirmed gates display, same reasoning as the score check just below --
-			# a track still in its min_hits confirmation window is genuinely "alive" (kept
-			# in active_ids) but not yet trusted as a real object, exactly like a track
-			# kept alive only by low-confidence recovery.
+			# t.confirmed gates display same as the score check: a track still in its
+			# min_hits confirmation window is kept in active_ids but not yet shown.
 			if t.score < self.conf_threshold or not t.confirmed:
 				continue
-			box_raw = t.box  # last-matched box, held as-is during occlusion -- see
-			# object_tracker.KeypointTrack's docstring for why there's no Kalman filter/
-			# prediction here. UNSMOOTHED on its own: KeypointTracker (unlike
-			# ByteTracker's Kalman filter) applies no damping of its own, so without the
-			# same smoothing lerp applied to keypoints below, the box would jump straight
-			# to each new detection's raw box every matched frame.
+			# Last-matched box, held as-is during occlusion (no Kalman filter/prediction --
+			# see object_tracker.KeypointTrack's docstring). KeypointTracker applies no
+			# damping of its own, so the smoothing lerp below is what keeps this from
+			# jumping straight to each new detection's raw box every matched frame.
+			box_raw = t.box
 
 			state = self._kpt_state.get(t.track_id)
 			raw_kpts = t.payload.get('keypoints')
@@ -386,11 +363,9 @@ class YOLO26PoseInference(ONNXInferenceManager):
 				# Only advance keypoint smoothing on a frame where this track actually
 				# matched a real detection -- a frame with no fresh match (lost_frames > 0)
 				# has no new keypoint data at all, so just let the hold counters age below.
-				# No per-keypoint confidence gate: if the box cleared Confthreshold, its
-				# keypoints are used as-is (this model's per-keypoint confidence values run
-				# far too low to be a meaningful signal on their own -- collapsed after
-				# confirming the gate only ever worked at threshold=0, i.e. never actually
-				# rejecting anything).
+				# No per-keypoint confidence gate: this model's per-keypoint confidence
+				# values run far too low to be a meaningful signal on their own, so if the
+				# box cleared Confthreshold, its keypoints are used as-is.
 				for k, (x, y, conf) in enumerate(raw_kpts):
 					sx, sy, _ = state['smoothed'][k]
 					state['smoothed'][k] = [
@@ -468,8 +443,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		def to_px(td_x, td_y):
 			"""TD-normalized coords (y: 0=bottom, 1=top) -> pixel (col, row) in this
 			function's plain top-down array (row 0 = top). The caller flips the whole
-			image back to TD's bottom-up convention afterward (see postprocess()) --
-			skipping the (1 - td_y) here was the original cause of an upside-down draw."""
+			image back to TD's bottom-up convention afterward (see postprocess())."""
 			return object_tracker.td_to_px(td_x, td_y, w, h)
 
 		for obj in self.tracked_objects:
@@ -557,10 +531,7 @@ class YOLO26PoseInference(ONNXInferenceManager):
 		at once). Written unconditionally every cook, same as write_tracks_to_table() --
 		these are parent-level data outputs, not debug-view-gated; whether anything
 		downstream (e.g. DebugSkeleton's geo_joints/geo_bones instancing) is actually
-		looking at them is entirely up to how they're wired, not this method. Bone
-		geometry (midpoint/angle/length) is computed in the same un-corrected coordinate
-		space the keypoints already live in; see onnx_yolo26_pose_bones_chop.py's retired
-		comment for why that's safe against DebugSkeleton camera's own aspect correction."""
+		looking at them is up to how they're wired, not this method."""
 		if self.opJointsTableDAT is not None:
 			tbl = self.opJointsTableDAT
 			tbl.clear()
@@ -595,10 +566,8 @@ class YOLO26PoseInference(ONNXInferenceManager):
 
 # Create global instance -- shut down any PREVIOUS instance first (releases its
 # GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
-# reload during active development doesn't leak both -- see
-# onnx_inference_manager.shutdown_and_register()'s docstring for the full
-# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
-# a real crash trying to persist a live, unpicklable manager instance).
+# reload during active development doesn't leak both. See Round 7/8 in
+# td-threaded-inference-optimization.md and onnx_inference_manager.shutdown_and_register().
 inference_manager = YOLO26PoseInference()
 onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
@@ -634,17 +603,15 @@ def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
 	read tracked_objects directly via a raw Python module reference
 	(op('../script1_callbacks').module.inference_manager), not through any wire or
 	parameter TD's dependency graph can see -- so AUTOMATIC's "is the output being used"
-	check has no way to know that whole downstream visualization depends on this script
-	having cooked, and stops cooking the moment nothing is directly viewing this TOP's
-	own pixels.
+	check stops cooking the moment nothing is directly viewing this TOP's own pixels,
+	even though downstream visualization still depends on it.
 
-	Unconditionally ALWAYS rather than switching to AUTOMATIC while paused: CookLevel is
-	only reconsidered when TD decides whether to attempt a cook at all, so once AUTOMATIC
-	settles into "not cooking" nothing prompts it to re-check later -- resuming play isn't
-	a registered dependency of this op, so it never recovers on its own (confirmed live).
-	The play/pause skip instead lives in ONNXInferenceManager.onCook() itself (checks
-	scriptOp.time.play and returns early), which keeps this op always eligible to cook
-	every frame so the very next real cook after resuming naturally picks back up.
+	Unconditionally ALWAYS rather than switching to AUTOMATIC while paused: once AUTOMATIC
+	settles into "not cooking," resuming play isn't a registered dependency of this op, so
+	it never recovers on its own. The play/pause skip instead lives in
+	ONNXInferenceManager.onCook() itself (checks scriptOp.time.play and returns early),
+	which keeps this op always eligible to cook so the next real cook after resuming
+	naturally picks back up.
 	"""
 
 	return CookLevel.ALWAYS

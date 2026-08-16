@@ -21,8 +21,7 @@ KEYPOINT_NAMES = ['eye_r', 'eye_l', 'nose', 'mouth_r', 'mouth_l']
 # Confidence threshold for a detected face to be shown/tracked (0.0 - 1.0). This is
 # ByteTracker's "high confidence" threshold -- detections at or above this score are
 # matched first and can start brand-new tracks. YuNet's own scores run fairly high for
-# real faces (this was tuned live in a prior project), unlike e.g. onnx_yolo26_pose.py's
-# degenerate low-confidence scene.
+# real faces, unlike e.g. onnx_yolo26_pose.py's degenerate low-confidence scene.
 CONF_THRESHOLD = 0.7
 
 # ByteTracker's "low confidence" threshold. Detections scoring between this and
@@ -42,12 +41,10 @@ MIN_BOX_HEIGHT = 0.02
 
 # Tracker: max frames to keep a lost track alive. Faces are prone to brief full
 # occlusion (head turn, hand pass, walking behind something) more than a general object
-# detector's targets, hence the longer buffer than onnx_yolo26_obj_det.py's default --
-# carried forward from this exact value already tuned live in a prior project.
+# detector's targets, hence the longer buffer than onnx_yolo26_obj_det.py's default.
 TRACKER_MAX_AGE = 45
 
-# Tracker: min IoU to accept a match between a track and a detection. Carried forward
-# from this exact value already tuned live in a prior project.
+# Tracker: min IoU to accept a match between a track and a detection.
 TRACKER_IOU_THRESHOLD = 0.2
 
 # Tracker: total matched frames (not necessarily consecutive -- see object_tracker.Track's
@@ -65,17 +62,16 @@ OUTPUT_SMOOTHING = 0.3
 
 # Which head-pose method to use -- see _compute_head_direction_geometric() (default,
 # keypoint-distance-ratio heuristic, no solver) vs _compute_head_direction_solvepnp()
-# (3D model + cv2.solvePnP, kept available behind this flag). The geometric method won
-# out live: far less jittery, since it's bounded distance ratios rather than an
-# ill-conditioned 6-DOF solve over 5 sparse near-planar points.
+# (3D model + cv2.solvePnP, kept available behind this flag). Geometric is the default:
+# far less jittery, since it's bounded distance ratios rather than an ill-conditioned
+# 6-DOF solve over 5 sparse near-planar points.
 POSE_METHOD = 'geometric'  # or 'solvepnp'
 
 # Degrees-per-ratio scale for the geometric method's yaw/pitch, SEPARATE for each axis
 # -- see _compute_head_direction_geometric()'s docstring for why one shared scale
 # doesn't work (yaw's and pitch's ratios cover very different natural ranges for the
-# same real rotation angle; confirmed via a synthetic known-rotation test, not guessed).
-# Tune live: these are calibrated against this ratio's own observed range for a
-# realistic head turn, not against a theoretical +-1 bound.
+# same real rotation angle). Tune live: calibrated against each ratio's own observed
+# range for a realistic head turn, not against a theoretical +-1 bound.
 POSE_YAW_SCALE = 340.0
 POSE_PITCH_SCALE = 100.0
 
@@ -105,23 +101,16 @@ KEYPOINT_COLOR_BGR = (0, 128, 255)  # Orange
 # solvePnP only needs plausible relative proportions to recover orientation, not exact
 # measurements) matched 1:1 against YuNet's 5 keypoints. Face-centered coordinate frame
 # deliberately matches OpenCV's camera-space convention (X = right, Y = DOWN, Z = away
-# from camera) rather than a more "natural" Y-up convention -- confirmed live that using
-# Y-up here made the (0,0,0) "facing camera" initial guess below actually correspond to
-# upside-down (since identity rotation maps model axes straight onto camera axes), which
-# systematically pulled every solve toward a ~180-degree-pitch local optimum. With Y-down,
-# identity rotation genuinely means "upright, facing the camera," matching the guess.
+# from camera), not a "natural" Y-up convention: with Y-up, the (0,0,0) "facing camera"
+# initial guess below would actually correspond to upside-down (identity rotation maps
+# model axes straight onto camera axes), pulling every solve toward a ~180-degree-pitch
+# local optimum. With Y-down, identity rotation genuinely means "upright, facing camera."
 #
 # Depth (Z) values are intentionally modest relative to the eye/mouth spread (~63mm
-# interpupillary distance, nose protruding only ~10-15mm forward of the eye/mouth plane)
-# -- an earlier version used depth values half the eye separation (way more exaggerated
-# than a real face), which made yaw specifically (the axis most dependent on correctly
-# interpreting depth from a near-planar point set) badly over/under-sensitive in
-# practice, while roll (nearly depth-independent -- it's basically just the 2D eye-line
-# slope) stayed fine. Confirmed live: this was the actual cause, not the solve itself
-# (a synthetic round-trip test -- known rotation -> projected points -> solve -- recovers
-# the input essentially exactly regardless of which proportions are used, since that test
-# never has real keypoint noise; the proportions only matter once real detection noise
-# gets amplified by whatever depth structure the model assumes).
+# interpupillary distance, nose protruding only ~10-15mm forward of the eye/mouth plane).
+# Exaggerating them makes yaw specifically (the axis most dependent on correctly
+# interpreting depth from a near-planar point set) badly over/under-sensitive, while
+# roll (nearly depth-independent -- basically just the 2D eye-line slope) is unaffected.
 _HEAD_MODEL_POINTS = np.array([
 	(-31.5, -20.0, -10.0),  # right eye
 	( 31.5, -20.0, -10.0),  # left eye
@@ -152,37 +141,28 @@ def _compute_head_direction_geometric(keypoints, yaw_scale=340.0, pitch_scale=10
 	switchable via the Posemethod par (this is the default). Uses bounded distance
 	RATIOS between the nose and the other 4 keypoints rather than solving a 6-DOF pose
 	from 5 sparse points, so it's far less sensitive to keypoint noise (no ill-
-	conditioned optimization, no near-planar flip ambiguity -- see
-	_compute_head_direction_solvepnp()'s docstring for what that cost us in practice) --
-	at the cost of not being a calibrated real-world angle, so each ratio is mapped to
-	degrees via its own tunable linear scale (Poseyawscale/Posepitchscale) instead of a
-	single shared one -- confirmed live via a synthetic known-rotation test that yaw's
-	and pitch's ratios cover very different natural ranges for the same real rotation
-	(yaw's ratio barely reaches ~0.13 at a true 45 degree turn, pitch's reaches ~0.45-0.56
-	at a true 45 degree nod), so one shared scale badly under-drove yaw specifically
-	while pitch behaved reasonably -- exactly the "yaw barely responds, feels swapped
-	with pitch" symptom reported live, on top of yaw's sign also being backwards
-	(fixed below; also confirmed via the same synthetic test, not guessed).
+	conditioned optimization, no near-planar flip ambiguity). Not a calibrated
+	real-world angle, so each ratio is mapped to degrees via its own tunable linear
+	scale (Poseyawscale/Posepitchscale) rather than a single shared one: yaw's and
+	pitch's ratios cover very different natural ranges for the same real rotation
+	(yaw barely reaches ~0.13 at a true 45 degree turn, pitch reaches ~0.45-0.56 at a
+	true 45 degree nod), so one shared scale would badly under-drive yaw specifically.
 
 	Yaw: as the head turns, the nose visually moves toward the near-side eye/mouth
 	  corner and away from the far side -- (nose-to-right distances) vs (nose-to-left
-	  distances), summed across both eye and mouth for noise-averaging (2 point-pairs
-	  instead of solvePnP's single 6-DOF solve over all 5 at once), turned into a ratio
-	  and scaled to degrees. The ratio saturates well before +-1 in practice (a real
-	  face is only reliably detectable up to some self-occlusion limit, the far corner
-	  vanishing, well before the mathematical 90 degrees) -- Poseyawscale is calibrated
-	  against the ratio's actual observed range, not against a theoretical +-1 bound.
+	  distances), summed across both eye and mouth for noise-averaging, turned into a
+	  ratio and scaled to degrees. The ratio saturates well before +-1 in practice (a
+	  real face is only reliably detectable up to some self-occlusion limit, the far
+	  corner vanishing, well before the mathematical 90 degrees) -- Poseyawscale is
+	  calibrated against the ratio's actual observed range, not a theoretical +-1 bound.
 	Pitch: identical idea, vertically -- nose distance to the eye-line vs the mouth-line.
-	  Sign was also confirmed backwards live (on a real rig, not just the synthetic
-	  test -- that test only checks self-consistency against this function's OWN
-	  arbitrary rot_x convention, not the real/TD-expected direction) and flipped, same
-	  as yaw. Has a small inherent baseline offset even at a neutral pose (real faces
-	  aren't perfectly symmetric top/bottom around the nose -- the mouth typically sits
-	  farther from the nose than the eyes do), left uncorrected since the right
-	  baseline varies per-face/per-camera-setup and hardcoding one measured against a
-	  synthetic model risks being wrong for a real face.
-	Roll: UNCHANGED from the old 2D heuristic -- eye-line tilt is already a genuine,
-	  robust real angle (this was never the problem; see the solvePnP version's history).
+	  Has a small inherent baseline offset even at a neutral pose (real faces aren't
+	  perfectly symmetric top/bottom around the nose -- the mouth typically sits farther
+	  from the nose than the eyes do), left uncorrected since the right baseline varies
+	  per-face/per-camera-setup and hardcoding one measured against a synthetic model
+	  risks being wrong for a real face.
+	Roll: eye-line tilt -- already a genuine, robust real angle, same as the solvePnP
+	  version's roll below.
 
 	Returns (0.0, 0.0, 0.0) if keypoints are missing/degenerate.
 	"""
@@ -197,19 +177,16 @@ def _compute_head_direction_geometric(keypoints, yaw_scale=340.0, pitch_scale=10
 
 	dist_r = np.linalg.norm(nose - eye_r) + np.linalg.norm(nose - mouth_r)
 	dist_l = np.linalg.norm(nose - eye_l) + np.linalg.norm(nose - mouth_l)
-	# (dist_r - dist_l), NOT (dist_l - dist_r) -- confirmed via a synthetic known-yaw
-	# test that the previous sign was backwards (a positive real yaw produced a
-	# negative ratio here).
+	# (dist_r - dist_l), NOT (dist_l - dist_r) -- a positive real yaw must produce a
+	# positive ratio here; the reversed order gives the opposite sign.
 	yaw_ratio = (dist_r - dist_l) / max(dist_l + dist_r, 1e-6)
 
 	eye_mid = (eye_r + eye_l) * 0.5
 	mouth_mid = (mouth_r + mouth_l) * 0.5
 	dist_eyes = np.linalg.norm(nose - eye_mid)
 	dist_mouth = np.linalg.norm(nose - mouth_mid)
-	# (dist_eyes - dist_mouth), NOT (dist_mouth - dist_eyes) -- confirmed live (on a real
-	# rig, not just the synthetic test, which only checks self-consistency against this
-	# function's OWN arbitrary rot_x convention, not the real/TD-expected direction) that
-	# the previous sign was backwards.
+	# (dist_eyes - dist_mouth), NOT (dist_mouth - dist_eyes) -- sign matters here the
+	# same way it does for yaw_ratio above.
 	pitch_ratio = (dist_eyes - dist_mouth) / max(dist_mouth + dist_eyes, 1e-6)
 
 	dx = eye_l[0] - eye_r[0]
@@ -225,12 +202,11 @@ def _compute_head_direction_solvepnp(keypoints, width, height, focal_scale=1.0):
 	"""Estimate real 3D head rotation -- yaw, pitch, roll, all in DEGREES -- from the 5
 	facial keypoints (TD-normalized coords) via cv2.solvePnP. Matches the 5 detected
 	keypoints against _HEAD_MODEL_POINTS (a rough canonical 3D face, not subject-specific)
-	using an approximate camera intrinsic matrix. This replaced an earlier ad hoc 2D-ratio
-	heuristic (nose offset from eye-midpoint, etc.) -- this is a genuine, if approximate,
-	3D orientation estimate, directly usable for driving an actual 3D rotation (e.g. a
-	cube's ry to visualize head turn), unlike that heuristic's unitless ratios.
-	cv2.solvePnP on this few points is a cheap numerical solve (not a model inference) --
-	negligible cost next to the detector itself.
+	using an approximate camera intrinsic matrix -- a genuine, if approximate, 3D
+	orientation estimate, directly usable for driving an actual 3D rotation (e.g. a
+	cube's ry to visualize head turn), unlike _compute_head_direction_geometric()'s
+	unitless ratios. cv2.solvePnP on this few points is a cheap numerical solve (not a
+	model inference) -- negligible cost next to the detector itself.
 
 	focal_scale: multiplier on the assumed focal length (focal_length = width *
 	  focal_scale) -- there's no real camera calibration available, so this is a
@@ -268,15 +244,14 @@ def _compute_head_direction_solvepnp(keypoints, width, height, focal_scale=1.0):
 	dist_coeffs = np.zeros((4, 1))
 
 	# ITERATIVE with an explicit extrinsic guess, NOT the default DLT-based init (needs
-	# >=6 points, fails on YuNet's 5) and NOT a bare EPNP call either -- EPNP alone
-	# picked a wildly wrong solution live (pitch ~162 degrees, i.e. "facing away and
-	# upside down"), a real flip ambiguity inherent to near-planar point sets like a
-	# face (two very different rotations can project to nearly the same 2D points).
-	# Seeding with a plausible "facing the camera, at a reasonable distance" guess and
-	# refining via Levenberg-Marquardt from there converges to the physically sensible
-	# solution instead of the ambiguous alternate one, and incidentally also sidesteps
-	# ITERATIVE's 6-point minimum (that minimum only applies to its own internal DLT
-	# initialization, which an explicit guess bypasses).
+	# >=6 points, fails on YuNet's 5) and NOT a bare EPNP call either -- EPNP alone can
+	# pick a wildly wrong solution (e.g. pitch ~162 degrees, "facing away and upside
+	# down"), a real flip ambiguity inherent to near-planar point sets like a face (two
+	# very different rotations can project to nearly the same 2D points). Seeding with
+	# a plausible "facing the camera, at a reasonable distance" guess and refining via
+	# Levenberg-Marquardt converges to the physically sensible solution instead, and
+	# incidentally sidesteps ITERATIVE's 6-point minimum (which only applies to its own
+	# internal DLT initialization, bypassed by the explicit guess).
 	rvec_guess = np.zeros((3, 1), dtype=np.float64)
 	tvec_guess = np.array([[0.0], [0.0], [focal_length]], dtype=np.float64)
 	success, rotation_vector, _ = cv2.solvePnP(
@@ -306,12 +281,12 @@ class YuNetInference(ONNXInferenceManager):
 	DNN module, not onnxruntime). That means the base class's model-loading method
 	(written specifically for ort.InferenceSession) doesn't apply, so this subclass
 	overrides _load_model_thread() directly rather than using get_session_options()/
-	on_model_loaded() the way the other scripts do -- but run_inference() (called from
-	the base class's own _worker_loop(), which already handles timing/locking/exceptions)
-	is still the right, current override point for the actual per-frame detect() call,
-	same as every other script's custom-session override (see onnx_rvm_seg.py). Every
-	other base class contract (threading model, onCook flow, self.session/is_loading/
-	load_error semantics, play/pause skip, perf tracking) is preserved unchanged.
+	on_model_loaded() the way the other scripts do. run_inference() (called from the
+	base class's own _worker_loop(), which handles timing/locking/exceptions) is still
+	the right override point for the per-frame detect() call, same as every other
+	script's custom-session override (see onnx_rvm_seg.py). Every other base class
+	contract (threading model, onCook flow, self.session/is_loading/load_error
+	semantics, play/pause skip, perf tracking) is preserved unchanged.
 
 	Tracking uses `object_tracker.ByteTracker` (shared across every ONNX script in this
 	project) for the full box-tracking lifecycle -- Kalman motion prediction, optimal
@@ -460,8 +435,8 @@ class YuNetInference(ONNXInferenceManager):
 		p[0].clampMax = False
 		p[0].help = ("Degrees-per-ratio scale for yaw specifically (only used when Head Pose Method "
 			"= Geometric) -- kept separate from Head Pose Pitch Scale since yaw's underlying ratio "
-			"covers a much smaller natural range than pitch's for the same real rotation (confirmed "
-			"live). Tune live: if head turns look too subtle, increase; too exaggerated, decrease.")
+			"covers a much smaller natural range than pitch's for the same real rotation. Tune live: "
+			"if head turns look too subtle, increase; too exaggerated, decrease.")
 		scriptOp.par.Poseyawscale = POSE_YAW_SCALE
 		p = page.appendFloat('Posepitchscale', label='Head Pose Pitch Scale (Geometric)', size=1)
 		p[0].default = POSE_PITCH_SCALE
@@ -549,15 +524,10 @@ class YuNetInference(ONNXInferenceManager):
 	def run_inference(self, input_tensor):
 		"""Overrides ONNXInferenceManager.run_inference(): calls cv2.FaceDetectorYN.detect()
 		instead of an onnxruntime session.run() -- self.session here is a cv2.FaceDetectorYN
-		object, not an ort.InferenceSession, so it has no .run() method at all. The base
-		class's _worker_loop() already wraps this call with its own timing/locking/
-		exception-handling -- see its docstring, which explicitly documents this exact
-		method as the extension point for a non-session.run() model (previously this
-		subclass instead reimplemented an entire "_inference_thread" worker method, a name
-		that predates the base class's _worker_loop rename and was never updated -- it
-		silently stopped overriding anything, so every call fell through to the base
-        class's default run_inference() and failed with 'cv2.FaceDetectorYN' object has
-		no attribute 'run' the moment this script was actually exercised live again)."""
+		object, not an ort.InferenceSession, so it has no .run() method at all. This is the
+		correct override point (base class's _worker_loop() wraps it with timing/locking/
+		exception-handling); see Round 2 in td-threaded-inference-optimization.md for a
+		past bug where this script overrode a stale worker-method name instead."""
 		_, faces = self.session.detect(input_tensor)
 		return faces
 
@@ -653,15 +623,14 @@ class YuNetInference(ONNXInferenceManager):
 		active_ids = {t.track_id for t in active_tracks}
 
 		# Isotropic box-size correction -- see docs/learnings/debug-comp-camera-aspect.md's
-		# "Bug 3". YuNet's own box regression, like BlazeFace/SCRFD's, comes out of the
+		# "Bug 3". YuNet's box regression, like BlazeFace/SCRFD's, comes out of the
 		# anisotropically-squished square input (fit_square_sm's 'fill' mode) roughly
-		# isotropic in practice under a severe (e.g. portrait) input aspect -- naively
-		# reprojecting its square-space w/h fractions independently against true_w/true_h
-		# produces a box whose aspect always drifts toward the true frame's own aspect
-		# instead of the real face's shape (confirmed live: vertically stretched boxes on
-		# a portrait input, correct on landscape). Re-expressing the size as a fraction of
-        # each axis's own true dimension, rather than reprojecting independently, fixes
-		# this the same way it was fixed for the mediapipe/hands landmark detectors.
+		# isotropic. Naively reprojecting its square-space w/h fractions independently
+		# against true_w/true_h produces a box whose aspect drifts toward the true frame's
+		# own aspect instead of the real face's shape (worst under a severe, e.g. portrait,
+		# input aspect). Re-expressing the size as a fraction of each axis's own true
+		# dimension, rather than reprojecting independently, fixes this the same way it
+		# was fixed for the mediapipe/hands landmark detectors.
 		null_passthrough = self.scriptOp.parent().op('null_passthrough')
 		true_w = null_passthrough.width if null_passthrough is not None else self.original_w
 		true_h = null_passthrough.height if null_passthrough is not None else self.original_h
@@ -914,8 +883,8 @@ def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
 	Unconditionally ALWAYS rather than switching to AUTOMATIC while paused: CookLevel is
 	only reconsidered when TD decides whether to attempt a cook at all, so once AUTOMATIC
 	settles into "not cooking" nothing prompts it to re-check later -- resuming play isn't
-	a registered dependency of this op, so it never recovers on its own (confirmed live).
-	The play/pause skip instead lives in ONNXInferenceManager.onCook() itself (checks
+	a registered dependency of this op, so it never recovers on its own. The play/pause
+	skip instead lives in ONNXInferenceManager.onCook() itself (checks
 	scriptOp.time.play and returns early), which keeps this op always eligible to cook
 	every frame so the very next real cook after resuming naturally picks back up.
 	"""

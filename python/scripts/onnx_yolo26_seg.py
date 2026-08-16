@@ -43,8 +43,7 @@ COCO_CLASSES = {
 CLASSES_TO_DETECT = ['person']
 
 # Which model variant to use: 'yolo26n-seg' (faster) or 'yolo26s-seg' (more accurate).
-# Both confirmed via a live probe (session.get_outputs() + a dummy-inference pass) to be
-# Ultralytics end2end exports, same convention as onnx_yolo26_pose.py's model:
+# Both are Ultralytics end2end exports, same convention as onnx_yolo26_pose.py's model:
 #   output0 [1, 300, 38] -- 300 pre-sorted/filtered candidates, 38 = 4 box + 1 conf +
 #            1 class_id + 32 mask coefficients
 #   output1 [1, 32, 160, 160] -- mask prototypes
@@ -136,7 +135,7 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 	Targets the Ultralytics end2end (one-to-one trained) ONNX export: output0
 	(1, 300, 38) pre-sorted by confidence, output1 (1, 32, 160, 160) mask prototypes --
 	same family/convention as onnx_yolo26_pose.py's model (see MODEL_VARIANT comment for
-	how this was confirmed, including the box-coordinate-space difference from pose).
+	the box-coordinate-space difference from pose).
 
 	Tracking uses `object_tracker.ByteTracker` (shared across every ONNX script in this
 	project) for the full box-tracking lifecycle -- Kalman motion prediction, optimal
@@ -328,8 +327,8 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 		if len(outputs) != 2:
 			self.printONNX(
 				f"WARNING: expected 2 outputs (detections + mask protos), got {len(outputs)} -- "
-				"postprocess() assumes the Ultralytics end2end seg export format confirmed live "
-				"for yolo26n/s-seg.onnx (see MODEL_VARIANT comment)."
+				"postprocess() assumes the Ultralytics end2end seg export format "
+				"(see MODEL_VARIANT comment)."
 			)
 
 	def preprocess(self, nA):
@@ -381,9 +380,9 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 		class_ids = pred[:, 5].astype(np.intp)
 		mask_coeffs = pred[:, 6:6 + num_mask_coeffs].copy()
 
-		# Auto-detect pixel-space vs normalized boxes -- confirmed live that this export's
-		# boxes run in pixel-space (0-640ish), unlike the pose model's normalized 0-1, but
-		# checking rather than hardcoding keeps this safe against a future re-export.
+		# Auto-detect pixel-space vs normalized boxes -- this export's boxes run in
+		# pixel-space (0-640ish), unlike the pose model's normalized 0-1, but checking
+		# rather than hardcoding keeps this safe against a future re-export.
 		box_max = boxes_raw.max() if boxes_raw.size else 0.0
 		if box_max > 1.5:
 			input_h, input_w = self.original_h, self.original_w
@@ -595,9 +594,7 @@ class YOLO26SegmentationInference(ONNXInferenceManager):
 				continue
 			# Per-pixel max, not overwrite -- composite is a single soft intensity
 			# (white), not per-track color, so taking the brighter of two overlapping
-			# instances' probabilities at a shared pixel is exactly correct (no
-			# channel-blend risk the earlier per-track-COLORED version had, where max
-			# across different hues could sum to white).
+			# instances' probabilities at a shared pixel is exactly correct.
 			np.maximum(composite, mask, out=composite)
 
 		composite = np.clip(composite, 0.0, 1.0)
@@ -732,10 +729,10 @@ def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
 	Unconditionally ALWAYS rather than switching to AUTOMATIC while paused: CookLevel is
 	only reconsidered when TD decides whether to attempt a cook at all, so once AUTOMATIC
 	settles into "not cooking" nothing prompts it to re-check later -- resuming play isn't
-	a registered dependency of this op, so it never recovers on its own (confirmed live).
-	The play/pause skip instead lives in ONNXInferenceManager.onCook() itself (checks
-	scriptOp.time.play and returns early), which keeps this op always eligible to cook
-	every frame so the very next real cook after resuming naturally picks back up.
+	a registered dependency of this op, so it never recovers on its own. The play/pause
+	skip instead lives in ONNXInferenceManager.onCook() itself (checks scriptOp.time.play
+	and returns early), which keeps this op always eligible to cook every frame so the
+	very next real cook after resuming naturally picks back up.
 	"""
 
 	return CookLevel.ALWAYS

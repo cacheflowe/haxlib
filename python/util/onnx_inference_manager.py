@@ -17,6 +17,7 @@ Usage:
 
 import os
 import time
+import math
 import threading
 import queue
 import gc
@@ -34,19 +35,13 @@ import td
 import numpy_util as npu  # numpy utilities
 
 # ========== ONNX logging/provider helpers ==========
-# Folded in from the former onnx_util.py (now a thin re-export shim -- see that file's
-# own comment) since every actual caller of these functions was already going through
-# self.onnx_util.X() (a proxy attribute pointing back at this same module), never a
-# direct module-level onnx_util.X() call -- confirmed by grepping every onnx_*.py script
-# in this project. Every onnx_*.py script now calls these directly: check_providers via
-# the self.check_providers() instance method below, providers()/log_onnx_options()/
-# log_model_details() as plain module-level functions (see _load_model_thread() and any
-# script that loads its own secondary session, e.g. onnx_hsemotion.py's emotion
-# classifier). The only genuinely indirect caller left is the legacy
-# tox/haxlib/ml/onnx/MovenetONNX.py, which looks 'onnx_util' up via TD's DAT-based mod()
-# mechanism (not a plain Python import) and is intentionally NOT modernized to this
-# pattern -- it predates ONNXInferenceManager entirely and is kept as a frozen
-# comparison baseline, not a live consumer of this base class.
+# Every onnx_*.py script calls check_providers via the self.check_providers() instance
+# method below, and providers()/log_onnx_options()/log_model_details() as plain module-
+# level functions (see _load_model_thread() and any script that loads its own secondary
+# session, e.g. onnx_hsemotion.py's emotion classifier). tox/haxlib/ml/onnx/MovenetONNX.py
+# is the one exception -- it looks 'onnx_util' up via TD's DAT-based mod() mechanism
+# instead of a plain import, and is intentionally NOT migrated to this pattern: it
+# predates ONNXInferenceManager entirely and is kept as a frozen comparison baseline.
 
 def printONNX(*args):
 	print("[ONNX]", *args)
@@ -57,47 +52,24 @@ def log_onnx_options():
 def providers(gpu_mem_limit_bytes=None):
 	"""CUDA (falling back to CPU) execution provider list, with explicit CUDA EP options.
 
-	NOTE: this previously also set arena_extend_strategy='kSameAsRequested' on the theory
-	that a fixed per-frame input shape wouldn't need ORT's default doubling-growth
-	arena. Measured live against rf-detr-seg-nano.onnx, that setting was a real
-	regression (effective fps dropped from 80s to mid-50s, and the project's
-	frame-delay compensator needed MORE frames, not fewer) -- 'kSameAsRequested' controls
-	how the arena EXTENDS when it needs more memory than it currently has cached, and if
-	the model's actual internal allocation pattern isn't byte-identical every call, it
-	forces the arena to re-extend (a real, synchronizing cudaMalloc) far more often than
-	the default 'kNextPowerOfTwo', which rounds generously so it rarely needs to re-extend
-	at all. Reverted -- don't re-add without measuring the isolated effect first.
+	Do NOT set arena_extend_strategy='kSameAsRequested' -- measured as a real regression
+	(rf-detr-seg-nano.onnx: ~80fps -> mid-50s, needed MORE Framedelay frames, not fewer).
+	See td-threaded-inference-optimization.md Round 2 for why and the numbers.
 
 	gpu_mem_limit_bytes: optional cap on how far the CUDA EP's arena is allowed to grow.
-	Left unset (ORT's own default, effectively unlimited) unless a caller has a specific
-	reason to reserve VRAM headroom -- e.g. for TD's own rendering pipeline, which shares
-	the same physical GPU as inference and isn't otherwise coordinated with it.
+	Left unset (ORT's own default) unless a caller needs to reserve VRAM headroom for TD's
+	own rendering, which shares the same physical GPU and isn't otherwise coordinated with it.
 
-	If a future caller ever batches a variable number of items into one session.run()
-	call (e.g. per-detection secondary classification across N tracked instances), be
-	aware the CUDA EP caches cuDNN's convolution-algorithm selection PER EXACT INPUT
-	SHAPE -- confirmed live (onnx_hsemotion.py) that a varying batch dimension means
-	almost every call hits a brand-new shape and re-pays a multi-second one-time search,
-	turning a batching "optimization" into a severe regression. Pad to a fixed ceiling
-	batch size instead of using the real (varying) count -- see
-	.ai/skills/td-threaded-inference-optimization.md's "Round 5" for the full story and
-	timing numbers.
+	If a future caller ever batches a variable number of items into one session.run() call,
+	pad to a fixed ceiling batch size first -- the CUDA EP caches cuDNN's convolution-
+	algorithm selection per exact input shape, and a varying batch dimension re-pays a
+	multi-second one-time search almost every call. See Round 5 for the full story.
 
-	`cudnn_conv_algo_search: 'HEURISTIC'` -- confirmed live via onnxruntime's own
-	`enable_profiling` trace (see docs/learnings/mediapipe-landmarks.md) that even with a
-	genuinely CONSTANT input shape every call, individual depthwise Conv nodes
-	periodically took ~200ms EACH (vs. microseconds normally) -- ~9 of them summing to a
-	~2-SECOND total stall that froze the whole TD app, recurring every 15-90+ seconds with
-	no obvious trigger. This is the default 'EXHAUSTIVE' algorithm search's cache being
-	evicted/re-triggered periodically, not a one-time per-shape cost -- plausibly from
-	cache pressure when multiple sessions/models (e.g. a detector + a separate landmark
-	model, as in every onnx_mediapipe_*.py script) share the same process-wide cuDNN
-	algorithm cache. 'HEURISTIC' picks a fast, good-enough algorithm via cuDNN's built-in
-	heuristics instead of an actual timed benchmark-and-cache search, eliminating this
-	class of stall entirely -- there is no longer a cache to evict, so there's nothing to
-	periodically re-pay. Confirmed via the same profiling trace: no individual Conv node
-	exceeded a few ms after this was set. Applies globally (every caller of this shared
-	providers() function), not just the script that first surfaced the symptom.
+	`cudnn_conv_algo_search: 'HEURISTIC'` avoids a different shape-cache stall (individual
+	Conv nodes periodically taking ~200ms each even with a constant input shape, from the
+	default 'EXHAUSTIVE' search's cache being evicted/re-triggered) -- see
+	docs/learnings/mediapipe-landmarks.md. Applies globally, to every caller of this
+	function, not just the script that first surfaced the symptom.
 	"""
 	cuda_options = {
 		'device_id': 0,
@@ -142,32 +114,13 @@ def check_providers(printfn, session):
 	return active
 
 # ========== Cyclic GC tax mitigation ==========
-# Confirmed live (a /run-script diagnostic wrapping run_inference() and recording per-call
-# timing over hundreds of samples): TD would periodically freeze for ~2 SECONDS every
-# 5-10 seconds during real-time ONNX inference, fully recovering afterward -- looked at
-# first like a GPU/CUDA stall, but disabling Python's cyclic garbage collector
-# (gc.disable()) made the freezes disappear completely (0 outliers over 45s / ~700 calls,
-# vs. 4 near-identical ~2075ms outliers in the previous 45s window with GC enabled). A live
-# TD project has an enormous number of long-lived Python-wrapped OP/Par objects for the
-# cyclic collector to traverse on every full (gen2) collection pass -- expensive purely
-# from graph SIZE, not from actual garbage volume (gc.get_stats() showed only dozens of
-# objects actually collected per gen2 pass). This is a known class of problem in real-time
-# Python hosts generally (long-lived object graph + periodic stop-the-world tracing), not
-# specific to this project's own code.
-#
-# Fully disabling gc is a PROCESS-WIDE change (affects every Python script/extension in
-# this TD session, not just ONNX scripts), so it's placed here (once, at import time, for
-# every consumer of this shared base class) rather than per-script. Reference-counting
-# (Python's primary memory management, always active regardless of this setting) still
-# immediately frees the overwhelming majority of objects -- this only stops CYCLE
-# detection, so it's a real but usually small tradeoff: any code elsewhere in the project
-# that creates true reference cycles (e.g. an extension holding a back-reference to its
-# owner COMP) will leak that cycle's memory for the life of the process instead of having
-# it swept up periodically. Judged acceptable here given the alternative is a
-# multi-second UI freeze every few seconds during any real-time ONNX inference. If a slow
-# memory growth is ever observed over very long (hours+) sessions, an explicit periodic
-# `gc.collect()` scheduled at a deliberately-idle moment (not mid-inference) would be the
-# next lever to reach for, rather than re-enabling automatic collection.
+# Disabled process-wide (affects every script/extension in the TD session, not just ONNX)
+# because Python's cyclic collector traversing this project's huge long-lived OP/Par object
+# graph was causing ~2s freezes every 5-10s during real-time inference -- reference
+# counting still frees everything except true cycles. See td-threaded-inference-
+# optimization.md Round 11 for the full investigation and numbers, and Round 7/8 for the
+# one place this project deliberately re-introduces a single manual gc.collect() anyway
+# (a leaked worker-thread reference cycle, collected at a moment provably not mid-inference).
 if gc.isenabled():
 	gc.disable()
 	printONNX('Disabled cyclic garbage collection to avoid periodic multi-second '
@@ -219,81 +172,105 @@ def log_performance(tbl, last_perf_log_time, frame_count, pre_ms, infer_ms, post
 
 
 # ========== Shared Performance Tracking (in-memory, no DAT node needed) ==========
-# Replaces the table_performance DAT approach above with an in-memory rolling history
-# plus a self-installing read-only custom parameter on the parent COMP ("base comp").
-# Every network stops needing its own table_performance node -- one less node whose
-# existence/wiring has to be kept consistent per network, and the read-only par is a
-# single glanceable number instead of a table to open. The table-based functions above
-# are left as-is (unused by onCook now, but not removed) per instruction.
+# In-memory rolling history plus self-installing read-only custom parameters on the parent
+# COMP ("base comp") -- no per-network table_performance node required. The table-based
+# functions above are unused by onCook but left in place; not removed.
 
 PERF_HISTORY_LEN = 30    # number of recent (throttled) samples averaged for the readout
 PERF_PAR_PAGE = 'Performance'
 PERF_PAR_NAME = 'Effectivefps'
 LATENCY_PAR_NAME = 'Pipelineframes'
+AUTO_FRAMEDELAY_PAR_NAME = 'Autoframedelay'
+PREPROCESS_MS_PAR_NAME = 'Preprocessms'
+INFERENCE_MS_PAR_NAME = 'Inferencems'
+POSTPROCESS_MS_PAR_NAME = 'Postprocessms'
+SKIPPED_PCT_PAR_NAME = 'Frameskippedpct'
+
+# How often the smoothed Pipelineframes/Framedelay estimate (and, sharing the same cadence,
+# the per-stage timing/skip-rate metrics below) is recomputed and written -- a few times a
+# second, not every frame (the raw per-frame number is noise, not signal; see
+# _update_sync_estimate()/_update_perf_metrics()) and not just once a second either (fast
+# enough to track a real change without a visible lag in the readout itself).
+SYNC_UPDATE_INTERVAL = 0.2
+# How far back the rolling window looks when computing the current estimate.
+SYNC_WINDOW_SECONDS = 1.0
+
+
+def _append_readonly_float(base_comp, name, label):
+	"""Self-install a single read-only float custom par on PERF_PAR_PAGE if it doesn't
+	already exist. Shared helper behind _ensure_perf_par()'s several near-identical pars."""
+	if hasattr(base_comp.par, name):
+		return
+	page = next((pg for pg in base_comp.customPages if pg.name == PERF_PAR_PAGE), None)
+	if page is None:
+		page = base_comp.appendCustomPage(PERF_PAR_PAGE)
+	p = page.appendFloat(name, label=label, size=1)
+	p[0].default = 0.0
+	p[0].readOnly = True  # scriptable, not UI-editable -- see Par.readOnly
 
 
 def _ensure_perf_par(base_comp):
-	"""Self-install read-only 'Effective FPS' and 'Pipeline Latency (Frames)' custom
-	parameters on the given COMP if they don't already exist. Shared across every
-	ONNXInferenceManager subclass, so each script's containing COMP gets these
+	"""Self-install this script's read-only performance/diagnostic custom parameters, plus
+	an 'Auto Frame Delay' toggle, on the given COMP if they don't already exist. Shared
+	across every ONNXInferenceManager subclass, so each script's containing COMP gets these
 	automatically -- no manual per-network TD setup.
 
 	Pipelineframes measures absTime.frame at capture time vs. at the moment that same
 	frame's result is actually pushed to the output TOP -- the ONNX pipeline's OWN
 	contribution to end-to-end latency (GPU readback delay + threaded inference
-	handoff quantization + postprocess), in whole TD frames. This is deliberately NOT the
-	same number as whatever a network's own cache/cacheselect Framedelay ends up needing
-	empirically -- if Pipelineframes reads e.g. 2-3 but a real Framedelay of 6 is needed to
-	visually resync, that gap is coming from somewhere else entirely (video source decode
-	latency, TD's own render/present pipelining, etc.), not from this script."""
+	handoff quantization + postprocess), in whole TD frames. This is deliberately NOT
+	necessarily the same number as whatever a network's own cache/cacheselect Framedelay
+	ends up needing empirically -- a gap between them would mean something else entirely
+	(video source decode latency, TD's own render/present pipelining, etc.) is also
+	contributing, not just this script. In practice (see _update_sync_estimate()) the two
+	have been observed to track closely.
+
+	The displayed Pipelineframes value is a rolling-MEDIAN estimate, not the raw per-frame
+	reading -- see _update_sync_estimate() -- since the raw number is too noisy frame-to-
+	frame to be a useful glanceable readout, and the median reports what's actually typical
+	rather than a worst case.
+
+	Preprocessms/Inferencems/Postprocessms are rolling AVERAGES (not max -- these are pure
+	diagnostics, nothing downstream depends on them the way Framedelay depends on
+	Pipelineframes, so a representative typical cost is more useful here than a worst-case
+	spike) of last_preprocess_ms/last_inference_ms/last_postprocess_ms, see
+	_update_perf_metrics(). Frameskippedpct is the rolling-average percentage of
+	frames_skipped_final relative to each completed capture-to-publish cycle -- how much of
+	this pipeline's own cadence is spent waiting on a still-busy worker thread, distinct
+	from Effectivefps (which only reflects compute time, not skipped/wasted cook calls).
+
+	Autoframedelay (default off) opts a comp into having Framedelay itself -- an existing,
+	hand-authored custom par read by that network's own cache/cacheselect Framedelay
+	expressions -- written automatically from this same smoothed estimate, instead of
+	requiring manual tuning. Off by default so no existing comp's behavior changes unless
+	explicitly enabled."""
 	if base_comp is None:
 		return
-	if not hasattr(base_comp.par, PERF_PAR_NAME):
+	_append_readonly_float(base_comp, PERF_PAR_NAME, 'Effective FPS (Inference)')
+	_append_readonly_float(base_comp, LATENCY_PAR_NAME, 'Pipeline Latency (Frames)')
+	_append_readonly_float(base_comp, PREPROCESS_MS_PAR_NAME, 'Preprocess (ms)')
+	_append_readonly_float(base_comp, INFERENCE_MS_PAR_NAME, 'Inference (ms)')
+	_append_readonly_float(base_comp, POSTPROCESS_MS_PAR_NAME, 'Postprocess (ms)')
+	_append_readonly_float(base_comp, SKIPPED_PCT_PAR_NAME, 'Frames Skipped (%)')
+	if not hasattr(base_comp.par, AUTO_FRAMEDELAY_PAR_NAME):
 		page = next((pg for pg in base_comp.customPages if pg.name == PERF_PAR_PAGE), None)
 		if page is None:
 			page = base_comp.appendCustomPage(PERF_PAR_PAGE)
-		p = page.appendFloat(PERF_PAR_NAME, label='Effective FPS (Inference)', size=1)
-		p[0].default = 0.0
-		p[0].readOnly = True  # scriptable, not UI-editable -- see Par.readOnly
-	if not hasattr(base_comp.par, LATENCY_PAR_NAME):
-		page = next((pg for pg in base_comp.customPages if pg.name == PERF_PAR_PAGE), None)
-		if page is None:
-			page = base_comp.appendCustomPage(PERF_PAR_PAGE)
-		p = page.appendFloat(LATENCY_PAR_NAME, label='Pipeline Latency (Frames)', size=1)
-		p[0].default = 0.0
-		p[0].readOnly = True
+		p = page.appendToggle(AUTO_FRAMEDELAY_PAR_NAME, label='Auto Frame Delay')
+		p[0].default = False
 
 
 # ========== Previous-instance tracking for clean script-reload shutdown ==========
-# Every onnx_*.py script's "Create global instance" section needs to find and
-# shutdown() its OWN previous manager instance before replacing it (see
-# ONNXInferenceManager.shutdown()'s docstring for why -- this is what stops a script
-# reload from leaking a GPU-resident session forever). A plain module-level global
-# doesn't survive a Callbacks DAT text reassignment (confirmed live: the re-executed
-# module gets a genuinely fresh globals() namespace).
-#
-# Do NOT use TD's own COMP-level store()/fetch() for this, even though it's designed
-# to survive exactly this kind of script recompilation -- it was tried first and
-# caused a real, live-confirmed problem: TD's Storage mechanism is meant for data that
-# gets serialized/persisted with the .toe project file, and a live manager instance
-# holds fundamentally unpicklable resources (a threading.Thread, a threading.Lock, a
-# GPU-resident ort.InferenceSession). Storing it live risked TD attempting to persist
-# that object on save, which is the leading suspect behind an actual TD crash
-# encountered while developing this fix, followed by a continuous model-reload loop
-# after restart. This module-level dict is the safe replacement: it's a plain Python
-# object living in a regular imported module (never serialized with the project,
-# unlike a COMP's Storage), keyed by each script's own parent COMP path so multiple
-# concurrent scripts don't collide.
-#
-# Guarded against globals() rather than a plain `_manager_registry = {}` so a /reload
-# of THIS module (needed whenever this file itself changes) doesn't wipe it -- confirmed
-# live this was a real gap, not just theoretical: /reload re-executes this module's
-# top-level code against its EXISTING globals() (importlib.reload() mutates the same
-# module object in place, it doesn't hand it a fresh namespace -- unlike a Callbacks
-# DAT's text reassignment, which does), so a plain reassignment here discarded every
-# already-registered instance while its worker thread and GPU session kept running
-# undisturbed, just no longer tracked -- silently disabling this whole safety net for
-# any of THOSE comps' next reload, for the rest of the TD session.
+# Every onnx_*.py script's "Create global instance" section calls shutdown_and_register()
+# to shutdown() its OWN previous manager instance before replacing it -- otherwise a script
+# reload leaks a GPU-resident session forever (a leaked worker thread keeps the whole old
+# instance reachable; see shutdown()'s docstring). A plain module-level global doesn't
+# survive a Callbacks DAT text reassignment (fresh globals() each time); TD's own COMP-level
+# store()/fetch() is NOT a substitute -- it's for project-persistent, picklable data, and a
+# live manager instance is neither. See td-threaded-inference-optimization.md Round 7 for
+# the full incident (a real TD crash from trying Storage instead) and Round 8 for why this
+# registry is guarded against globals() (a /reload of this module reuses the same globals()
+# dict rather than getting a fresh one, so a plain reassignment would wipe it).
 if '_manager_registry' not in globals():
 	_manager_registry = {}
 
@@ -301,9 +278,7 @@ if '_manager_registry' not in globals():
 def shutdown_and_register(comp_path, new_manager):
 	"""Call from each onnx_*.py script's "Create global instance" section, AFTER
 	constructing the new manager instance: shuts down whatever was previously
-	registered for this exact comp_path (if anything), then registers the new one.
-	See the _manager_registry comment above for why this exists instead of a plain
-	global or TD's own Storage."""
+	registered for this exact comp_path (if anything), then registers the new one."""
 	prev = _manager_registry.get(comp_path)
 	if prev is not None:
 		prev.shutdown()
@@ -340,6 +315,21 @@ class ONNXInferenceManager:
 		self._capture_abs_frame = None  # absTime.frame at the moment nA was captured
 		self.last_pipeline_frames = 0  # measured capture->output latency, in TD frames
 		self.numpy_array_delayed = True  # see onCook's capture branch -- live-toggleable
+
+		# Auto Frame Delay -- see _update_sync_estimate(). Raw (timestamp, value) samples
+		# of last_pipeline_frames, pruned to the last SYNC_WINDOW_SECONDS on each update.
+		self._pipeline_frames_samples = []
+		self._smoothed_pipeline_frames = 0.0
+		self._last_sync_update_time = 0.0
+
+		# Per-stage diagnostics -- see _update_perf_metrics(). Same rolling-window style as
+		# above but plain rolling averages (no asymmetric decay -- pure diagnostics, nothing
+		# downstream depends on these the way Framedelay depends on Pipelineframes).
+		self._preprocess_ms_samples = []
+		self._inference_ms_samples = []
+		self._postprocess_ms_samples = []
+		self._skipped_pct_samples = []
+		self._last_perf_metrics_update_time = 0.0
 
 		# Optional detector-submission throttle -- default 1 (every cook, no change for any
 		# existing script). A subclass wanting this (see onnx_mediapipe_hands.py) sets
@@ -456,10 +446,120 @@ class ONNXInferenceManager:
 			base = self.scriptOp.parent()
 			_ensure_perf_par(base)
 			base.par.Effectivefps = round(avg_fps, 1)
-			base.par.Pipelineframes = self.last_pipeline_frames
 		except:
 			pass
-	
+
+	def _update_sync_estimate(self):
+		"""Maintain a realistic (rolling-MEDIAN) estimate of pipeline latency, recomputed a
+		few times a second (SYNC_UPDATE_INTERVAL) -- not every frame, which would just be
+		noise, and not only once a second either, which would make the readout laggy to a
+		real change.
+
+		Call every frame (self.last_pipeline_frames is appended to the window each time);
+		internally throttles the actual recompute+write.
+
+		Uses the window's MEDIAN, not a rolling max. An earlier version tracked the max
+		(with asymmetric decay: jump up immediately, ease down by 1/tick) specifically to
+		drive Autoframedelay safely -- under-delaying there is a real correctness bug, the
+		cache/cacheselect compensator would read a not-yet-ready or stale frame. But a
+		direct sample of raw last_pipeline_frames (15 readings, 300ms apart) showed a
+		mode/median of 3 with real frame-to-frame variance (2-4), not "typically 2 with
+		rare spikes to 4-5" the way the max-based readout implied -- the max wasn't wrong,
+		it was answering a different, deliberately worst-case question. The median reports
+		what's ACTUALLY typical, and is naturally resistant to a rare outlier (a single
+		contention-driven stall) without needing hand-tuned decay.
+
+		Writes the estimate to Pipelineframes (replacing the raw single-frame number that
+		used to go there -- too noisy frame-to-frame to be a useful glanceable readout, see
+		_ensure_perf_par()'s docstring) and, only if Autoframedelay is on, to the network's
+		own (pre-existing, hand-authored) Framedelay par. Autoframedelay is NOT recommended
+		in practice for a cache/cacheselect Framedelay compensator regardless of which
+		statistic drives it -- see Round 10 in td-threaded-inference-optimization.md: any
+		change to Framedelay resizes/re-indexes the cache and is visibly glitchy on its own,
+		independent of how accurate the value driving it is. Skipped entirely if the comp
+		has no Framedelay par (no cache/cacheselect compensator set up) or Autoframedelay is
+		off."""
+		now = time.perf_counter()
+		self._pipeline_frames_samples.append((now, self.last_pipeline_frames))
+
+		if now - self._last_sync_update_time < SYNC_UPDATE_INTERVAL:
+			return
+		self._last_sync_update_time = now
+
+		cutoff = now - SYNC_WINDOW_SECONDS
+		self._pipeline_frames_samples = [(t, v) for t, v in self._pipeline_frames_samples if t >= cutoff]
+		if not self._pipeline_frames_samples:
+			return
+		values = sorted(v for _, v in self._pipeline_frames_samples)
+		mid = len(values) // 2
+		self._smoothed_pipeline_frames = (
+			values[mid] if len(values) % 2 else (values[mid - 1] + values[mid]) / 2.0
+		)
+
+		try:
+			base = self.scriptOp.parent()
+			_ensure_perf_par(base)
+			base.par.Pipelineframes = round(self._smoothed_pipeline_frames, 1)
+			if (
+				hasattr(base.par, 'Framedelay')
+				and hasattr(base.par, AUTO_FRAMEDELAY_PAR_NAME)
+				and getattr(base.par, AUTO_FRAMEDELAY_PAR_NAME).eval()
+			):
+				base.par.Framedelay = int(math.ceil(self._smoothed_pipeline_frames))
+		except Exception:
+			pass
+
+	@staticmethod
+	def _rolling_average(samples, new_value, now, window_seconds=SYNC_WINDOW_SECONDS):
+		"""Append (now, new_value), prune anything older than window_seconds (samples are
+		always appended in increasing time order, so the oldest entries are always at the
+		front), and return the average of what remains. Shared by _update_perf_metrics()'s
+		several near-identical rolling windows."""
+		samples.append((now, new_value))
+		cutoff = now - window_seconds
+		while samples and samples[0][0] < cutoff:
+			samples.pop(0)
+		return sum(v for _, v in samples) / len(samples)
+
+	def _update_perf_metrics(self):
+		"""Maintain rolling-average per-stage timing (Preprocessms/Inferencems/
+		Postprocessms) and frame-skip-rate (Frameskippedpct) diagnostics, recomputed at the
+		same cadence as _update_sync_estimate() (SYNC_UPDATE_INTERVAL). Call once per
+		completed capture-to-publish cycle, right alongside where last_preprocess_ms/
+		last_inference_ms/last_postprocess_ms are all already finalized for this cycle.
+
+		Unlike _update_sync_estimate()'s Pipelineframes, these are plain rolling averages,
+		not a rolling max with asymmetric decay -- nothing downstream is driven by these
+		values (see _ensure_perf_par()'s docstring), so a representative typical cost is
+		more useful here than deliberately surfacing a worst-case spike.
+
+		Frameskippedpct is frames_skipped_final (how many cook cycles were skipped, waiting
+		on a still-busy worker thread, before THIS cycle's result became available) expressed
+		as a percentage of the cycle's total length (skipped + 1, the +1 being this cycle's
+		own successful cook) -- how much of this pipeline's own cadence is going to waiting,
+		distinct from Effectivefps (which only reflects compute time, not idle/skipped cooks).
+		"""
+		now = time.perf_counter()
+		if now - self._last_perf_metrics_update_time < SYNC_UPDATE_INTERVAL:
+			return
+		self._last_perf_metrics_update_time = now
+
+		skipped_pct = 100.0 * self.frames_skipped_final / (self.frames_skipped_final + 1)
+		avg_preprocess = self._rolling_average(self._preprocess_ms_samples, self.last_preprocess_ms, now)
+		avg_inference = self._rolling_average(self._inference_ms_samples, self.last_inference_ms, now)
+		avg_postprocess = self._rolling_average(self._postprocess_ms_samples, self.last_postprocess_ms, now)
+		avg_skipped_pct = self._rolling_average(self._skipped_pct_samples, skipped_pct, now)
+
+		try:
+			base = self.scriptOp.parent()
+			_ensure_perf_par(base)
+			base.par.Preprocessms = round(avg_preprocess, 2)
+			base.par.Inferencems = round(avg_inference, 2)
+			base.par.Postprocessms = round(avg_postprocess, 2)
+			base.par.Frameskippedpct = round(avg_skipped_pct, 1)
+		except Exception:
+			pass
+
 	# ========== Methods to Override in Subclasses ==========
 	
 	def get_model_path(self):
@@ -679,29 +779,18 @@ class ONNXInferenceManager:
 
 	def _ensure_worker_started(self):
 		"""Lazily start the ONE persistent inference worker thread for this manager
-		instance's lifetime. Lazy (not started in __init__) so a manager that never
-		actually runs inference (e.g. failed model load) never pays for a thread at all.
+		instance's lifetime (not in __init__, so a manager that never actually runs
+		inference never pays for a thread at all). Also restarts the worker if the
+		previous thread died/was shut down -- checking is_alive(), not just is None, so a
+		manager instance that outlives its own worker thread can still resume inference.
 
-		Also restarts the worker if the previous thread died/was shut down (see
-		shutdown()) -- checking is_alive(), not just is None, so a manager instance that
-		outlives its own worker thread (e.g. after an explicit shutdown()) can still
-		resume inference rather than silently never processing work again.
-
-		CORRECTION to an earlier version of this comment, which called the tradeoff
-		below "an accepted minor leak... not something that compounds during normal
-		use" -- that was wrong, confirmed live: every script reload during active
-		development (editing an onnx_*.py file and pushing it into a live Callbacks DAT)
-		creates a NEW manager instance with its own new worker thread, and the OLD
-		instance's worker thread has no shutdown hook tied to that reload -- it blocks
-		forever on an empty queue.get(). A blocked-but-alive thread's own stack frame
-		holds a live reference to `self` (the bound method it was started with), which
-		keeps the ENTIRE old manager instance reachable and un-garbage-collectable --
-		including its loaded ort.InferenceSession(s) and all the GPU/CUDA memory they
-		hold. This is NOT near-zero cost: confirmed live with 20+ accumulated reloads
-		across a single dev session, GPU memory usage climbed to 96% (15.7/16.4 GB) and
-		utilization pegged at 100%, requiring a full TD restart. See shutdown() and every
-		onnx_*.py script's "Create global instance" section, which now calls it on the
-		previous instance before constructing a new one specifically to prevent this."""
+		A worker thread left running past its manager's useful life is not a "minor leak":
+		it keeps the whole manager instance (and its GPU-resident session) reachable and
+		un-collectable, since the thread's own stack frame holds a live reference to self.
+		See shutdown()/td-threaded-inference-optimization.md Round 7 for the real incident
+		(GPU memory pegged at 96%/100% util after 20+ accumulated script reloads) and why
+		every onnx_*.py script's "Create global instance" section calls shutdown() on the
+		previous instance before constructing a new one."""
 		if self._worker_thread is not None and self._worker_thread.is_alive():
 			return
 		self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -709,35 +798,21 @@ class ONNXInferenceManager:
 
 	def shutdown(self):
 		"""Cleanly release this manager's GPU-resident ONNX Runtime session(s) and stop
-		its background worker thread -- call this on the OLD manager instance right
-		before a script reload replaces it with a new one (see every onnx_*.py script's
-		"Create global instance" section), instead of leaking both. See
-		_ensure_worker_started()'s docstring for the full mechanism this prevents.
+		its background worker thread -- call this on the OLD manager instance right before
+		a script reload replaces it with a new one, instead of leaking both. See
+		_ensure_worker_started()'s docstring for the mechanism this prevents.
 
-		Sends _worker_loop() its shutdown sentinel so the thread's `while True` loop
-		actually returns instead of blocking forever, then BLOCKS (joins with a timeout)
-		until it actually has -- confirmed live that without this join, the caller (the
-		script's "Create global instance" section) immediately constructs and starts
-		loading the NEW model while the OLD thread is still mid-exit, so both models'
-		CUDA memory arenas briefly coexist. On a GPU already near its limit (this
-		project's steady-state load across every ONNX_Playground comp routinely sits at
-		80%+), that transient overlap during a save-triggered script reload (TD's file-
-		sync noticing the backing .py changed and re-executing the module) is exactly
-		what tips it into running out of memory, even though nothing is permanently
-		leaked once the old thread finishes.
+		Sends _worker_loop() its shutdown sentinel, then BLOCKS (joins with a timeout)
+		until the thread actually exits -- without this join, the new model starts loading
+		while the old one's CUDA arena is still being torn down, and both can briefly
+		coexist on a GPU that's often already near its limit. See Round 8 for the
+		save-triggered-reload incident this specifically fixes.
 
-		Also proactively clears any ort.InferenceSession-typed attribute (self.session,
-		plus any subclass-specific extra session like a landmark/emotion model) via
-		introspection rather than requiring each subclass to override this, then forces
-		ONE manual gc.collect() -- safe here specifically because this runs between
-		models, not mid-inference, unlike the periodic collection this project disabled
-		globally (see the module-level gc.disable() comment above) to avoid multi-second
-		freezes. A worker thread that held the last reference to a bound method of self
-		creates a genuine reference cycle (self -> _worker_thread -> _target -> self);
-		CPython's own threading module clears _target once the thread function returns,
-		which normally breaks that cycle via plain refcounting alone -- but any OTHER
-		cycle this class (or a subclass) doesn't yet know about would otherwise sit
-		uncollected for the life of the process with cyclic GC off."""
+		Also clears any ort.InferenceSession-typed attribute via introspection (covers
+		subclass-specific extra sessions, e.g. a landmark/emotion model, with no per-
+		subclass override needed), then forces ONE manual gc.collect() -- safe here since
+		this runs between models, not mid-inference, unlike the periodic collection this
+		project disabled globally (see the module-level gc.disable() comment above)."""
 		if self._worker_thread is not None and self._worker_thread.is_alive():
 			try:
 				self._work_queue.put_nowait(None)
@@ -753,16 +828,14 @@ class ONNXInferenceManager:
 		gc.collect()
 
 	def _worker_loop(self):
-		"""Persistent background worker -- replaces the old pattern of spawning a brand
-		new OS thread every single frame. Blocks on the work queue between frames (near-
-		zero cost while idle) and starts session.run() the instant work is queued, saving
-		the thread-creation/startup overhead a fresh threading.Thread paid every frame.
+		"""Persistent background worker: blocks on the work queue between frames (near-
+		zero cost while idle), runs ONLY session.run() (see run_inference()'s own
+		docstring for why nothing else belongs here).
 
-		This tightens scheduling slightly but does NOT eliminate the dominant sources of
-		input-to-output latency: TD's onCook only checks pending_result once per whole
-		frame (so a result that lands mid-frame still waits for the next cook to be
-		picked up), and the CUDA EP shares the same physical GPU as TD's own rendering,
-		which isn't otherwise coordinated with inference's own GPU submissions.
+		Does NOT eliminate the dominant sources of input-to-output latency: TD's onCook
+		only checks pending_result once per whole frame (a result landing mid-frame still
+		waits for the next cook), and the CUDA EP shares the same physical GPU as TD's own
+		rendering, uncoordinated with it.
 		"""
 		while True:
 			input_tensor = self._work_queue.get()
@@ -852,21 +925,12 @@ class ONNXInferenceManager:
 				self.pending_result = None
 				self.frames_skipped = 0
 				
-				# Postprocess on main thread (safe for TD operator access). For every
-				# tracker script in this project, THIS call is where the frame's real
-				# payload is actually finalized: postprocess() sets self.tracked_objects
-				# as a side effect, on top of returning output_img. Everything published
-				# to TD below -- this TOP's pixels via copyNumpyArray() a few lines down,
-				# AND whatever Table DATs/CHOP channels a subclass flushes from
-				# self.tracked_objects, whether via on_result_published() (below) or the
-				# older pending_table_update-flag-checked-by-the-wrapper-after-onCook-
-				# returns pattern most existing onnx_*.py scripts still use -- comes from
-				# this exact same call's result. They can never disagree with each other
-				# on WHICH detection cycle they represent, only on how many CPU
-				# instructions of this same cook happen to separate one publish from the
-				# other (see the capture/dispatch fall-through comment below for the one
-				# real ordering quirk that follows from the OLDER pattern -- on_result_
-				# published() exists specifically to avoid it).
+				# Postprocess on main thread (safe for TD operator access). THIS call is
+				# where the frame's real payload is finalized: postprocess() sets
+				# self.tracked_objects as a side effect, on top of returning output_img --
+				# everything published below (this TOP's pixels, any Table DAT/CHOP output
+				# a subclass flushes) comes from this exact same result, so they can never
+				# disagree on WHICH detection cycle they represent.
 				t0 = time.perf_counter()
 				output_img = self.postprocess(raw_outputs)
 				self.last_postprocess_ms = (time.perf_counter() - t0) * 1000
@@ -891,39 +955,26 @@ class ONNXInferenceManager:
 						self.last_pipeline_frames = td.absTime.frame - self._capture_abs_frame
 					except Exception:
 						pass
+					self._update_sync_estimate()
+					self._update_perf_metrics()
 
 				# Record performance sample (once per second) -- see _record_perf_sample()
 				self._frame_count += 1
 				self._record_perf_sample()
 
 				# Deliberately NOT returning here -- fall through to the capture/dispatch
-				# code below so a fresh frame gets captured and submitted to the worker
-				# in this SAME cook, immediately after consuming this result. This is
-				# exactly what this method's own docstring already claims ("inspired by
-				# MoveNet pattern") but an earlier version of this code didn't actually
-				# do: an unconditional `return` here meant the next capture always had
-				# to wait for a whole SEPARATE cook cycle, injecting one extra frame of
-				# latency into every single inference cycle regardless of model or
-				# queue/lock design. Confirmed live by comparing against
-				# tox/haxlib/ml/onnx/MovenetONNX.py's old runInferenceThreaded(), which
-				# consumes a completed result and dispatches the next capture in the
-				# same call -- exactly the behavior restored here. is_inferencing is
-				# reliably already False by the time execution reaches the check just
-				# below: the worker thread (_worker_loop) sets pending_result and then
-				# is_inferencing=False sequentially, on the same thread, with no
+				# code below so a fresh frame is captured and submitted in this SAME cook,
+				# immediately after consuming this result, instead of injecting one extra
+				# frame of latency waiting for a separate cook cycle (see
+				# td-threaded-inference-optimization.md Round 9). is_inferencing is
+				# reliably already False by the check just below: the worker thread sets
+				# pending_result and then is_inferencing=False sequentially, with no
 				# intervening I/O, before this lock is ever released.
 				#
-				# ORDERING NOTE for subclasses using the OLDER pending_table_update-flag
-				# pattern instead of on_result_published() above: that flag only gets
-				# checked by the subclass's own onCook wrapper AFTER this whole method
-				# returns -- so for those scripts, the real publish order is (1) this
-				# frame's TOP texture via copyNumpyArray() above, (2) the NEXT frame's
-				# capture + worker-thread dispatch below (unrelated data, just CPU time
-				# spent before returning), (3) this frame's Table DAT writes, back in the
-				# subclass's wrapper. Not a data-consistency bug -- (1) and (3) are still
-				# built from the exact same postprocess() call's tracked_objects -- just a
-				# non-obvious CPU-time ordering. on_result_published() runs BEFORE this
-				# fall-through instead, avoiding it entirely for any script that uses it.
+				# A subclass using the older pending_table_update-flag pattern (instead of
+				# on_result_published() above) publishes its Table DAT one step later than
+				# it needs to -- not a data bug, just avoidable CPU-time ordering. See
+				# on_result_published()'s own docstring.
 
 		# If inference is still running, skip this frame (natural frame skipping via threading)
 		if self.is_inferencing:
@@ -945,14 +996,13 @@ class ONNXInferenceManager:
 		# never touches the raw TD buffer.
 		try:
 			inputTex = scriptOp.inputs[0]
-			# numpy_array_delayed is a live-toggleable instance attribute (not a constant)
-			# specifically so it can be flipped from an external /run probe without a code
-			# redeploy -- see the class docstring's latency-diagnostic note. delayed=True
-			# (the default) avoids a CPU/GPU sync stall by accepting whatever frame TD's
-			# own async GPU->CPU download queue happens to have ready; that queue's own
-			# depth is invisible to Pipelineframes (which only measures latency AFTER this
-			# call returns), so it's the prime remaining suspect when Pipelineframes reads
-			# much lower than an empirically-needed Framedelay.
+			# numpy_array_delayed is a live-toggleable instance attribute, not a constant,
+			# so it can be flipped from an external /run probe without a code redeploy.
+			# delayed=True (the default) avoids a CPU/GPU sync stall by accepting whatever
+			# frame TD's own async GPU->CPU download queue happens to have ready -- that
+			# queue's own depth is invisible to Pipelineframes, which only measures
+			# latency from THIS call onward. See td-threaded-inference-optimization.md
+			# Round 2 for the True vs False tradeoff (staleness vs stall duration).
 			nA = inputTex.numpyArray(delayed=self.numpy_array_delayed)
 			if nA is None:
 				return

@@ -21,12 +21,11 @@ _track_color = object_tracker.track_color
 DETECTOR_MODEL_FILENAME = 'detection.onnx'
 EMOTION_MODEL_FILENAME = 'emotion.onnx'
 
-# Confirmed live (session.get_outputs() against the real file): detection.onnx has 9
-# outputs (score_8, score_16, score_32, bbox_8, bbox_16, bbox_32, kps_8, kps_16, kps_32)
-# -- matches the reference util.py's `len(outputs) == 9` branch: fmc=3,
-# feat_stride_fpn=[8,16,32], num_anchors=2, use_kps=True. Keypoints are NOT decoded here
-# -- the reference's own forward() never actually populates them either (points_list is
-# dead code in the given util.py), and nothing downstream (emotion recognition) needs them.
+# detection.onnx has 9 outputs (score_8, score_16, score_32, bbox_8, bbox_16, bbox_32,
+# kps_8, kps_16, kps_32) -- matches the reference util.py's `len(outputs) == 9` branch:
+# fmc=3, feat_stride_fpn=[8,16,32], num_anchors=2, use_kps=True. Keypoints are NOT
+# decoded here -- the reference's own forward() never populates them either, and nothing
+# downstream (emotion recognition) needs them.
 FEAT_STRIDE_FPN = [8, 16, 32]
 NUM_ANCHORS = 2
 
@@ -37,30 +36,21 @@ NUM_ANCHORS = 2
 _DET_MEAN = 127.5
 _DET_SCALE = 1.0 / 128.0
 
-# Emotion model's own normalization (confirmed against the reference
-# HSEmotionRecognizer.preprocess()) -- coincidentally identical constants to ImageNet's
-# own mean/std, not a re-derived assumption; img_size=260 per that same reference (NOT
-# 224 -- the demo script's own inline comment saying "adjust size as per model
-# requirements" is misleading, the actual HSEmotionRecognizer class hardcodes 260).
+# Emotion model's own normalization, from the reference HSEmotionRecognizer.preprocess()
+# -- coincidentally identical to ImageNet's mean/std. img_size is 260, not the 224 that
+# reference's own inline comment suggests; HSEmotionRecognizer hardcodes 260.
 EMOTION_IMG_SIZE = 260
 _EMO_MEANS = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 _EMO_STDS = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 EMOTION_CLASSES = ['ANGER', 'DISGUST', 'FEAR', 'HAPPINESS', 'NEUTRAL', 'SADNESS', 'SURPRISE']
 
-# Fixed ceiling for _classify_emotions_batch()'s padded batch size -- confirmed live (a
-# standalone timing probe) that ONNX Runtime's CUDA EP pays a one-time multi-second cuDNN
-# algorithm-search cost the FIRST time it sees any given batch size, then caches that
-# choice and runs fast (~10ms) on every later call with the SAME size. Since the number of
-# tracked faces changes almost every frame, calling the emotion session with the raw
-# (varying) face count meant nearly every classification frame hit a brand-new shape and
-# re-triggered that multi-second search -- batching made things dramatically WORSE than
-# the original one-call-per-face version, which accidentally avoided this entirely by
-# always calling with batch size 1. Padding every call to this ONE fixed size keeps the
-# shape constant so the cache only ever needs to warm up once, preserving the real win
-# (one call instead of N) without paying that tax repeatedly. Faces beyond this count in a
-# single frame are simply not classified that frame (extremely unlikely in practice; raise
-# this if it's ever actually hit).
+# Fixed ceiling for _classify_emotions_batch()'s padded batch size. ONNX Runtime's CUDA EP
+# pays a one-time multi-second algorithm-search cost the first time it sees a given batch
+# shape; since tracked-face count varies every frame, padding every call to this one fixed
+# size keeps the shape constant so that cost is only paid once (see Round 5 in
+# td-threaded-inference-optimization.md). Faces beyond this count in a single frame are
+# simply not classified that frame (raise this if that's ever actually hit).
 MAX_BATCH_FACES = 16
 
 # Confidence threshold for a detected face to be shown/tracked. ByteTracker's "high
@@ -110,21 +100,16 @@ class HSEmotionInference(ONNXInferenceManager):
 
 	Genuinely two-stage, unlike every other script in this project: face DETECTION runs
 	through the normal threaded ONNXInferenceManager pipeline (session.run() on the
-	persistent worker thread, same as every other script), but per-face EMOTION
-	classification runs synchronously on the MAIN thread inside postprocess(), once per
-	currently-tracked face, using a second plain ort.InferenceSession that isn't threaded
-	at all. This matches the reference demo's own usage (predict_emotions is called
-	directly in its main loop, no threading there either) and is justified by how cheap a
-	single 260x260 classifier call is compared to the detector itself -- a second
-	full threaded pipeline (with its own queue/worker-thread machinery) would be a lot of
-	added complexity for a handful of small, fast synchronous calls per frame.
+	persistent worker thread), but per-face EMOTION classification runs synchronously on
+	the MAIN thread inside postprocess(), using a second plain (unthreaded)
+	ort.InferenceSession. A single 260x260 classifier call is cheap enough that a full
+	second threaded pipeline (its own queue/worker-thread machinery) isn't worth the
+	added complexity, and this matches the reference demo's own unthreaded usage.
 
 	Face crops for emotion classification come from the SAME resized working frame the
-	detector itself runs on (see preprocess()'s self._last_frame_rgb), not a separate
-	higher-resolution original frame -- crop quality is bounded by this network's own
-	Inputwidth, so increase that if emotion recognition needs sharper detail on
-	distant/small faces (a single knob controls both detection and emotion-crop quality
-	together).
+	detector runs on (see preprocess()'s self._last_frame_rgb) -- crop quality is bounded
+	by this network's own Inputwidth, so increase that if emotion recognition needs
+	sharper detail on distant/small faces.
 	"""
 
 	def __init__(self):
@@ -306,20 +291,14 @@ class HSEmotionInference(ONNXInferenceManager):
 		self.printONNX(f"  Active providers: {self._emotion_session.get_providers()}")
 
 	def preprocess(self, nA):
-		"""Preprocess for the SCRFD face detector. UNLIKE every fixed-square-input
-		detector elsewhere in this project (BlazeFace/BlazePalm/YOLO26 -- all trained on
-		a fixed square resize, where squishing to square upstream via fit_square_sm's
-		'fill' stretch is the CORRECT choice since it matches training-time preprocessing),
-		SCRFD's own ONNX graph declares a fully dynamic input shape (confirmed live:
-		['?', 3, '?', '?']) -- a fully-convolutional FPN detector with no fixed-size
-		layer forcing a specific resolution, conventionally trained on WIDER FACE images
-		at their native aspect ratios rather than force-squished to square. Squishing to
-		square here would feed it MORE distorted, out-of-distribution faces than
-		preserving the source aspect ratio, not less -- so this network intentionally
-		resizes upstream WITHOUT forcing a square shape (whatever fit/resolution TOP is
-		wired above this script), and both preprocess() and the per-stride anchor decode
-		below already work in genuinely separate self.original_h/self.original_w terms
-		(no square assumption anywhere) to support that."""
+		"""Preprocess for the SCRFD face detector. UNLIKE the fixed-square-input detectors
+		elsewhere in this project (BlazeFace/BlazePalm/YOLO26), SCRFD's ONNX graph declares
+		a fully dynamic input shape (['?', 3, '?', '?']) -- a fully-convolutional FPN
+		detector trained on WIDER FACE images at their native aspect ratio, not squished
+		to square. So this network intentionally resizes upstream WITHOUT forcing a
+		square shape (whatever fit/resolution TOP is wired above this script), and both
+		preprocess() and the per-stride anchor decode below work in separate
+		self.original_h/self.original_w terms rather than assuming square input."""
 		self.original_h, self.original_w = nA.shape[:2]
 		num_channels = nA.shape[2] if len(nA.shape) == 3 else 1
 
@@ -532,12 +511,11 @@ class HSEmotionInference(ONNXInferenceManager):
 		frame (self._last_frame_rgb, the same one the detector ran on), resize each to
 		260x260, and run them all through the emotion classifier in a SINGLE batched
 		session.run() call rather than one call per face -- the emotion model's own input
-		shape ([batch_size, 3, 260, 260]) supports this directly, and the reference
-		implementation's own predict_multi_emotions() does exactly this. Calling it once
-		per face (this method's earlier, simpler version) pays ONNX Runtime's fixed
-		per-call dispatch overhead N times for no reason; confirmed live this was the
-		actual bottleneck, not the face detector itself (postprocess() -- almost entirely
-		this step -- measured ~4x the detector's own inference time with 5 tracked faces).
+		shape ([batch_size, 3, 260, 260]) supports this directly, matching the reference
+		implementation's own predict_multi_emotions(). Batch size must stay fixed at
+		MAX_BATCH_FACES across calls -- see Round 5 in
+		td-threaded-inference-optimization.md for why a varying batch size is much worse
+		than batching at all.
 
 		Returns a list the same length as boxes_native, each element either a (7,)
 		softmax score array or None for a degenerate/zero-size crop."""

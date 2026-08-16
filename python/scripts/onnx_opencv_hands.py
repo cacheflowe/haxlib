@@ -19,50 +19,33 @@ _track_color = object_tracker.track_color
 # ==================== CONFIGURATION ====================
 # MediaPipe Hands (BlazePalm detector + 21-point hand landmark model), OpenCV Zoo ONNX
 # exports (data/ml/opencv_zoo/) -- REPLACES the earlier Qualcomm AI Hub export
-# (onnx_mediapipe_hands.py, data/ml/mediapipe/hand_detector.onnx). That export had an
-# unresolved, severe pathology: individual tiny depthwise Conv nodes would periodically
-# take ~200ms each (vs. low single-digit microseconds normally), summing to ~2-second full
-# TD freezes every 5-90 seconds, confirmed via ONNX Runtime's own profiler and NOT
-# explained by Python GC, ORT's cuDNN algorithm search settings, cross-model GPU
-# contention, submission-frequency throttling, or an actual Windows/driver TDR reset (see
-# docs/learnings/mediapipe-landmarks.md for the full investigation) -- all ruled out with
-# direct live measurement. The sibling BlazeFace export (onnx_mediapipe_face.py, same
-# Qualcomm pipeline, same architecture family) never showed this, pointing at something
-# specific to that one model export rather than CUDA/onnxruntime/depthwise-convs in
-# general. This script uses an INDEPENDENTLY converted export of the same MediaPipe Hands
-# architecture (OpenCV's own TFLite->ONNX conversion, not Qualcomm's) to test whether the
-# pathology is export-specific -- see that same doc for the outcome once verified live.
+# (onnx_mediapipe_hands.py) after that export showed a severe periodic-freeze pathology;
+# see docs/learnings/mediapipe-landmarks.md for the full investigation. This script uses
+# an independently converted export of the same MediaPipe Hands architecture (OpenCV's own
+# TFLite->ONNX conversion, not Qualcomm's) to sidestep it.
 #
 # Same two-stage architecture as onnx_mediapipe_face.py/onnx_mediapipe_hands.py: palm
 # DETECTION runs through the normal threaded ONNXInferenceManager pipeline; per-hand
 # LANDMARK inference runs synchronously on the main thread inside postprocess(), one call
 # per hand (fixed batch-1 input).
 #
-# Important export-specific differences from the Qualcomm version (each confirmed via a
-# standalone local script -- both these models, unlike the Qualcomm ones, load fine with
-# onnxruntime's CPU provider in a plain local conda env, no opset issues, so full
-# preprocess/decode verification was done OFFLINE against a real video frame before ever
-# touching TD):
+# Important export-specific differences from the Qualcomm version:
 #   - Input tensors are NHWC ([1,H,W,3]), NOT NCHW like the Qualcomm export -- simpler for
 #     TD besides, since a TOP's numpyArray() is already HWC.
 #   - Palm detector input is 192x192 (not 256x256), using MediaPipe's own STOCK anchor
-#     config (confirmed exact match against a hardcoded 2016-row anchor table shipped in
-#     OpenCV Zoo's own reference script: NUM_LAYERS=4, strides=[8,16,16,16]) -- no
-#     reverse-engineering needed here, unlike the Qualcomm export's undocumented 2944-anchor
-#     grid.
+#     config (NUM_LAYERS=4, strides=[8,16,16,16]), matching OpenCV Zoo's own reference
+#     anchor table exactly -- no reverse-engineering needed here, unlike the Qualcomm
+#     export's undocumented 2944-anchor grid.
 #   - Landmark model input is 224x224 (MediaPipe's own stock size, not Qualcomm's 256).
-#   - Landmark model output x/y is in CROP-SPACE PIXELS directly (confirmed via a raw
-#     session.run() probe: values ranged ~65-175 for a 224-sized crop) -- the OPPOSITE
+#   - Landmark model output x/y is in CROP-SPACE PIXELS directly -- the OPPOSITE
 #     convention from the Qualcomm export (which was normalized 0-1, see
 #     docs/learnings/mediapipe-landmarks.md). Do NOT apply the same "* LANDMARK_INPUT_SIZE"
 #     scaling used there.
-#   - Landmark model outputs, in ONNX Runtime's own order (confirmed by tracing the actual
-#     ONNX graph, not just trusting OpenCV's reference script): [landmarks, hand_confidence
+#   - Landmark model outputs, in ONNX Runtime's own order: [landmarks, hand_confidence
 #     (sigmoid already applied), handedness (sigmoid already applied), world_landmarks].
 #   - ROI enlarge/shift constants are OpenCV's own tuned values (scale=3.0, shift_y=-0.4),
 #     not MediaPipe's stock published values (2.6, -0.5) -- taken directly from OpenCV
-#     Zoo's own mp_handpose.py reference script since this export was presumably
-#     calibrated against them.
+#     Zoo's own mp_handpose.py reference script.
 DETECTOR_MODEL_FILENAME = 'palm_detection_mediapipe_2023feb.onnx'
 LANDMARK_MODEL_FILENAME = 'handpose_estimation_mediapipe_2023feb.onnx'
 
@@ -79,10 +62,9 @@ DETECTOR_INPUT_SIZE = 192
 
 # ---- Rotation-aligned ROI (for the landmark model) ----
 # Same MediaPipe rotation convention as onnx_mediapipe_hands.py (wrist->middle-MCP aligned
-# to the rect's local +Y axis, target_angle=90 degrees) -- confirmed identical in OpenCV's
-# own mp_handpose.py (PALM_LANDMARKS_INDEX_OF_PALM_BASE=0, _MIDDLE_FINGER_BASE=2, same
-# atan2-based formula). ROI_SCALE/SHIFT_Y are OpenCV's own PALM_BOX_ENLARGE_FACTOR/
-# PALM_BOX_SHIFT_VECTOR[1] values, not MediaPipe's stock 2.6/-0.5.
+# to the rect's local +Y axis, target_angle=90 degrees), matching OpenCV's own
+# mp_handpose.py. ROI_SCALE/SHIFT_Y are OpenCV's own tuned values, not MediaPipe's stock
+# 2.6/-0.5.
 TARGET_ANGLE_RAD = math.pi / 2.0
 ROTATION_START_KEYPOINT = 0  # wrist
 ROTATION_END_KEYPOINT = 2    # middle finger MCP
@@ -100,10 +82,9 @@ NUM_LANDMARKS = 21
 # model's own `hand_confidence` ("presence") output drops below threshold (hand turned away/
 # occluded/out of frame). We still run the palm detector every frame (needed to feed
 # ByteTracker's multi-hand IoU matching and to catch newly-entering hands), but for the ROI
-# actually fed to the landmark model we now prefer this landmark-derived crop when available.
-# This is expected to be the main lever for stability at odd hand angles: a frame where
-# BlazePalm's own box regression struggles with an angled/edge-on palm no longer disturbs an
-# already-good landmark-based crop, since that crop no longer depends on the detector at all.
+# fed to the landmark model we prefer this landmark-derived crop when available -- this is
+# the main lever for stability at odd hand angles, since it no longer depends on BlazePalm's
+# own box regression once a hand is being tracked.
 PRESENCE_THRESHOLD = 0.5  # below this, distrust held landmarks -- fall back to detector ROI
 LANDMARK_ROI_MARGIN = 1.6  # padding around the landmark-derived bbox (already spans the full
 # hand incl. fingers, unlike the palm detector's tight palm-only box -- so this is much
@@ -142,22 +123,16 @@ LOW_CONF_THRESHOLD = 0.3
 NMS_IOU_THRESHOLD = 0.3
 CENTER_DEDUP_DIST_FACTOR = 0.8  # see onnx_mediapipe_hands.py's comment on this constant
 # A more lenient distance factor used ONLY when two candidates' rotation angle (wrist->
-# middle-MCP vector) nearly agrees -- diagnosed live against a real phantom: BlazePalm can
-# fire a smaller, HIGHER-scoring detection on just a hand's finger-tip cluster, complete
-# with its own self-consistent (but wrong-scale) wrist/middle-MCP keypoints, positioned far
-# enough from the real hand's box/keypoints that plain CENTER_DEDUP_DIST_FACTOR (0.8) can't
-# safely be raised to catch it without risking merging two genuinely different, similarly-
-# oriented real hands. But that phantom's own predicted rotation angle matched the real
-# hand's almost exactly (~2 degrees apart, confirmed live) -- a coincidence a genuinely
-# separate hand is very unlikely to share purely by chance. So: agreement on ORIENTATION is
-# used to justify a wider merge radius, not used as the sole criterion by itself.
-ANGLE_DEDUP_DIST_FACTOR = 2.0  # raised from an initial 1.3 after live diagnosis found a
-# real phantom/real pair sitting ~1.7x pair-size apart -- confirmed live that 2.0 merges it
-# correctly (picks the larger, correctly-scaled box as the survivor). TRADEOFF, not free:
-# this also widens the radius within which two GENUINELY SEPARATE real hands with similar
-# orientation (e.g. a prayer/clasped-hands two-hand pose) could be incorrectly merged into
-# one detection -- test explicitly against such two-hand poses before trusting this blindly;
-# lower via the Anglededuprange par if false merges of real hands show up in practice.
+# middle-MCP vector) nearly agrees. BlazePalm can fire a smaller, higher-scoring phantom
+# detection on just a hand's fingertip cluster, with its own self-consistent but wrong-scale
+# keypoints, positioned too far from the real hand for CENTER_DEDUP_DIST_FACTOR alone to
+# merge safely without risking merging two genuinely different real hands -- but a
+# genuinely separate hand is unlikely to share the same orientation by coincidence, so
+# agreement on ORIENTATION is used to license a wider merge radius, not as a criterion alone.
+ANGLE_DEDUP_DIST_FACTOR = 2.0  # TRADEOFF, not free: widens the radius within which two
+# GENUINELY SEPARATE real hands with similar orientation (e.g. a prayer/clasped-hands pose)
+# could be incorrectly merged into one detection -- lower via the Anglededuprange par if
+# false merges of real hands show up in practice.
 ANGLE_DEDUP_DEG = 20.0  # max rotation-angle difference (degrees) to treat as "same orientation"
 MIN_BOX_WIDTH = 0.02
 MIN_BOX_HEIGHT = 0.02
@@ -237,10 +212,9 @@ class OpenCVHandInference(ONNXInferenceManager):
 			# Hands move fast/erratically enough that constant-velocity extrapolation
 			# through even a couple of lost frames drifts the predicted box past where the
 			# hand actually reappears, dropping IoU below match_thresh and spawning a new
-			# track ID instead of reacquiring the old one -- see object_tracker.py's
-			# Track.mark_lost() for the full reasoning. Unlike a walking person (this
-			# tracker's other callers), a hand's velocity a few frames ago is a poor
-			# predictor of its position now, so holding position steady is more reliable.
+			# track instead of reacquiring the old one -- see object_tracker.py's
+			# Track.mark_lost(). Holding position steady is more reliable here than for a
+			# walking person (this tracker's other callers).
 			freeze_velocity_on_loss=True,
 		)
 		self._box_state = {}
@@ -570,31 +544,22 @@ class OpenCVHandInference(ONNXInferenceManager):
 		max_hands = int(self._par_or_default('Maxhands', MAX_HANDS))
 
 		# Drop any raw candidate this frame that's a likely phantom of an ALREADY-TRACKED
-		# hand -- regardless of whether we're at max_hands capacity. A capacity-gated
-		# version of this check ("only filter once we already have max_hands tracks") isn't
-		# enough: with only ONE real hand tracked and max_hands=2, there's still nominally
-		# an open slot, so a phantom sharing that one real hand's rough position/orientation
-		# would sail right through as a "legitimate" candidate for the second slot -- which
-		# is exactly this bug's real repro case. Inspired by MediaPipe's own
-		# hand_landmark_tracking graph, which uses a GateCalculator to skip palm detection
-		# ENTIRELY once enough hands are tracked (confirmed via its real source:
-		# NormalizedRectVectorHasMinSizeCalculator + GateCalculator gated on
-		# PreviousLoopbackCalculator's previous-frame hand count) -- we still run the
-		# detector every frame (gating that call itself needs a bigger restructuring of
-		# this project's always-on ONNXInferenceManager worker), but this reaches for the
-		# same effective intent at the per-candidate level instead.
+		# hand, regardless of max_hands capacity -- a capacity-gated check alone isn't
+		# enough: with only ONE real hand tracked and max_hands=2, a phantom sharing that
+		# hand's rough position/orientation would still slip through as a "legitimate"
+		# candidate for the open slot. Mirrors the intent of MediaPipe's own
+		# hand_landmark_tracking graph (which gates palm detection off entirely once enough
+		# hands are tracked); we still run the detector every frame and instead apply the
+		# same effective filtering per-candidate.
 		#
-		# Care is needed not to break normal tracking: a candidate with a strong native-
-		# space IoU against an EXISTING track is very likely that track's own correct
-		# update for this frame (ByteTracker's own Hungarian association handles that)
-		# and must be left alone -- filtering it out here would silently starve real
-		# tracking updates. Only candidates WITHOUT a strong direct IoU match to any
-		# existing track -- i.e. ones that would otherwise fall through to spawn a
-		# brand-new track -- get checked against the wider center+orientation test (the
-		# same one _dedup_by_center_distance uses, just against each track's own persisted
-		# box_native/rot_keypoints_native instead of same-frame peers); a match there means
-		# "probably the same hand at the wrong assumed scale," so it's dropped rather than
-		# allowed to spawn a competing track.
+		# Only candidates WITHOUT a strong direct IoU match to an existing track are checked
+		# here -- a candidate with a strong match is very likely that track's own correct
+		# per-frame update, left to ByteTracker's Hungarian association. Candidates that
+		# would otherwise spawn a brand-new track are checked against the same
+		# center+orientation test _dedup_by_center_distance uses, but against each track's
+		# own persisted box_native/rot_keypoints_native instead of same-frame peers; a match
+		# means "probably the same hand at the wrong assumed scale," so it's dropped instead
+		# of spawning a competing track.
 		if len(boxes_native) > 0 and self.tracker.tracks:
 			track_native_boxes = [t.payload.get('box_native') for t in self.tracker.tracks]
 			track_native_boxes = [b for b in track_native_boxes if b is not None]
@@ -621,14 +586,11 @@ class OpenCVHandInference(ONNXInferenceManager):
 			scores_valid = scores_valid[top_n]
 			kps_valid = kps_valid[top_n]
 
-		# Isotropic box-SIZE correction -- see onnx_mediapipe_face.py's identical fix for
-		# the full reasoning. Confirmed the same architectural pattern here too: BlazePalm's
-		# box regression outputs w_raw==h_raw in square-buffer terms (fixed_anchor_size),
-		# so naively reprojecting width by true_w and height by true_h independently bakes
-		# the true frame's own aspect ratio into every box (matches the reported symptom:
-		# hand box "vertically squished, way smaller than actual hand" -- a hand is
-		# naturally taller than wide, but the naive reprojection forces every box toward
-		# the frame's own wide aspect ratio instead).
+		# Isotropic box-SIZE correction -- see onnx_mediapipe_face.py's identical fix and
+		# docs/learnings/debug-comp-camera-aspect.md (Bug 3) for the full reasoning.
+		# BlazePalm's box regression outputs w_raw==h_raw in square-buffer terms
+		# (fixed_anchor_size), so naively reprojecting width by true_w and height by true_h
+		# independently bakes the source frame's own aspect ratio into every box.
 		box_w_sq = boxes_native[:, 2] - boxes_native[:, 0]
 		box_h_sq = boxes_native[:, 3] - boxes_native[:, 1]
 		box_cx_sq = (boxes_native[:, 0] + boxes_native[:, 2]) / 2
@@ -675,15 +637,11 @@ class OpenCVHandInference(ONNXInferenceManager):
 			})
 
 		if len(confirmed) > max_hands:
-			# Established seniority (total_frames) beats raw freshness here -- NOT
-			# lost_frames first. A real hand briefly occluded (lost_frames>0 but many
-			# total_frames of real history) should always outrank a brand-new spurious
-			# detection (lost_frames=0, total_frames=1) for one of the max_hands slots --
-			# otherwise this cap directly defeats Tracklossframes' whole purpose, evicting
-			# an occluded-but-genuinely-tracked hand from the output the instant a noise
-			# detection sneaks past NMS/dedup, which reads as flicker even though the real
-			# track was still alive and being predicted underneath. lost_frames/score only
-			# break ties among similarly-established tracks.
+			# Seniority (total_frames) beats raw freshness/lost_frames here: a briefly
+			# occluded but long-tracked hand should outrank a brand-new spurious detection
+			# for one of the max_hands slots -- otherwise this cap defeats Tracklossframes'
+			# purpose the instant a noise detection sneaks past NMS/dedup. lost_frames/score
+			# only break ties among similarly-established tracks.
 			confirmed.sort(key=lambda c: (-c['track'].total_frames, c['track'].lost_frames, -c['track'].score))
 			confirmed = confirmed[:max_hands]
 
@@ -801,26 +759,16 @@ class OpenCVHandInference(ONNXInferenceManager):
 		presence_threshold) -- an ROI derived directly from THOSE landmarks (wrist +
 		middle-MCP for rotation, full 21-point bbox for position/size), bypassing the
 		detector's box entirely. See PRESENCE_THRESHOLD/LANDMARK_ROI_MARGIN's module-level
-		comment for why -- this mirrors MediaPipe's own hand-tracking pipeline and is
-		expected to be far more stable at odd hand angles than re-deriving the crop from
-		the palm detector every single frame.
+		comment for why.
 
-		Works in TRUE (pre-square) pixel units for the rotation/scale/center math, not
-		the square working buffer's own pixel units -- see onnx_mediapipe_face.py's
-		identical method for the full reasoning. `fit_square_sm`'s 'fill' stretch
-		preserves axis-aligned POSITION fractions exactly (box center needs no
-		correction), but NOT size: this detector's box regression always outputs
-		width_fraction == height_fraction in square-space (fixed_anchor_size, confirmed
-		live -- see Bug 3 in docs/learnings/debug-comp-camera-aspect.md), so naively
-		multiplying each by its own true dimension inflates whichever axis the source
-		frame is wider on -- an oversized crop (the hand rendered smaller than intended
-		within the landmark model's input) that can read as "landmarks scaled up"
-		relative to the real hand. The ROTATION step separately does NOT have the
-		fraction-preservation property either: rotating within an anisotropically-
-		stretched pixel grid introduces real shear relative to the true, undistorted
-		frame. Confirmed live: cv2 debug overlay looked correct on the square buffer
-		while the Debug COMP's geo-instanced mesh (true-aspect canvas) showed a clearly
-		stretched hand until the rotation fix.
+		Works in TRUE (pre-square) pixel units for the rotation/scale/center math, not the
+		square working buffer's own pixel units -- see onnx_mediapipe_face.py's identical
+		method and docs/learnings/debug-comp-camera-aspect.md (Bug 3) for the full
+		reasoning. `fit_square_sm`'s 'fill' stretch preserves axis-aligned POSITION
+		fractions exactly, but not SIZE (this detector's box regression outputs
+		width_fraction == height_fraction in square-space) or ROTATION (rotating within an
+		anisotropically-stretched pixel grid introduces real shear) -- both need
+		correcting against the true, undistorted frame.
 		"""
 		results = [(None, None, None)] * len(confirmed)
 		frame = self._last_frame_rgb
@@ -1045,12 +993,11 @@ def _match_existing_tracks(boxes, kps, tracks, wrist_idx, mid_mcp_idx, dist_fact
 	"""Boolean keep-mask: True for each candidate detection that plausibly belongs to one
 	of `tracks` (by the same center+orientation test as _dedup_by_center_distance, just
 	comparing against each track's own persisted box_native/rot_keypoints_native payload
-	instead of same-frame peers). See the call site in postprocess() for why -- this is
-	what actually stops a phantom from spawning a brand-new competing track once we're
-	already at max_hands, for cases the same-frame dedup pass doesn't catch (diagnosed
-	live: some phantom/real pairs sit farther apart, relatively, than any single fixed
-	dedup radius can safely cover without risking two genuinely separate real hands --
-	but they still shouldn't get a new track when there's no open slot regardless)."""
+	instead of same-frame peers). See the call site in postprocess() -- this stops a
+	phantom from spawning a brand-new competing track once already at max_hands, for cases
+	the same-frame dedup pass doesn't catch (some phantom/real pairs sit too far apart for
+	any single fixed dedup radius to safely cover without risking merging two genuinely
+	separate real hands, but still shouldn't get a new track when there's no open slot)."""
 	track_centers, track_sizes, track_angles = [], [], []
 	for t in tracks:
 		tb = t.payload.get('box_native')
@@ -1089,36 +1036,25 @@ def _dedup_by_center_distance(boxes, scores, dist_factor, wrist_kps=None, mid_mc
 	IoU NMS, for same-object multi-scale-anchor duplicates IoU alone can miss.
 
 	Suppression radius uses max(kept_size, candidate_size), NOT just the currently-kept
-	box's own size. A pure "radius = dist_factor * sizes[i]" (i = the higher-scoring, just-
-	kept box) breaks down whenever a SMALL phantom happens to score higher than the real,
-	larger hand box that frame (plausible -- a tight, clean-looking crop around just the
-	fingertips/knuckles can score confidently) -- the phantom gets kept first, and its own
-	tiny size gives a suppression radius far too small to reach the real hand's center, so
-	the real box survives right alongside it (confirmed live: reported as a small phantom
-	hand sharing fingertips with the real one). Standard IoU-based NMS doesn't catch this
-	either, since IoU between a small nested box and a large containing box is naturally low
-	regardless of score ordering. Using the PAIR's max size instead makes this symmetric --
-	whichever box is larger determines the radius, independent of which one scored higher.
+	box's own size: a small phantom (e.g. a tight crop around just the fingertips) can
+	score higher than the real, larger hand box, and using only the kept box's own size
+	would give a suppression radius too small to reach the real hand's center. Standard
+	IoU-based NMS doesn't catch this either, since IoU between a small nested box and a
+	large containing box is naturally low regardless of score ordering. Using the pair's
+	max size makes this symmetric, independent of which one scored higher.
 
-	A live-diagnosed variant of this same phantom did NOT share a close center OR close
-	wrist/middle-MCP keypoints with the real hand (its own keypoints are self-consistent for
-	a wrong, smaller assumed scale) -- so no purely position-based radius can safely be
-	widened to catch it without risking merging two genuinely separate, similarly-oriented
-	real hands. But its predicted rotation ANGLE (wrist->middle-MCP vector) matched the real
-	hand's almost exactly. When wrist_kps/mid_mcp_kps/angle_dist_factor are supplied, a pair
-	whose rotation angle agrees within ANGLE_DEDUP_DEG is ALSO merged if within the more
-	lenient angle_dist_factor radius -- orientation agreement is what licenses the wider
-	radius; it is deliberately not used as a merge criterion on its own.
+	When wrist_kps/mid_mcp_kps/angle_dist_factor are supplied, a pair whose rotation angle
+	(wrist->middle-MCP vector) agrees within ANGLE_DEDUP_DEG is ALSO merged if within the
+	more lenient angle_dist_factor radius: some phantoms share a real hand's orientation
+	without sharing its center or keypoints, and orientation agreement alone licenses the
+	wider radius rather than being used as a merge criterion by itself.
 
 	Clusters same-object candidates by processing in descending-score order (a box only
 	seeds a NEW cluster if it isn't already claimed by an earlier, higher-scoring seed's
 	radius), but the cluster's SURVIVING representative is whichever member has the LARGEST
-	box, not whichever seeded the cluster. Confirmed live this distinction matters: after
-	first fixing the radius/angle logic above, the phantom (which scored higher) still won
-	every merge as the literal seed, so the single surviving detection was consistently the
-	WRONG, undersized box -- score correlates with "looks like a confident hand crop," not
-	with "correctly captures the whole hand's true extent," so picking the largest member is
-	a better proxy for correctness than picking the highest-scoring one.
+	box, not whichever seeded the cluster -- score correlates with "looks like a confident
+	hand crop," not with correctly capturing the hand's true extent, so picking the largest
+	member is a better proxy for correctness than picking the highest-scoring one.
 	"""
 	if len(boxes) == 0:
 		return []

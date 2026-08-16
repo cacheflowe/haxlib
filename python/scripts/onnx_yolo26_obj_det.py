@@ -47,14 +47,11 @@ DEFAULT_COLOR_BGR = (255, 255, 255)  # White fallback
 
 # ==================== CONFIGURATION ====================
 # Classes to detect (empty list = detect ALL 80 COCO classes). NOTE: ByteTracker's
-# matching is class-agnostic (pure IoU on boxes) -- it doesn't stop a detection of one
-# class from being matched to an existing track of a different class if their boxes
-# overlap enough. That's a non-issue as long as CLASSES_TO_DETECT stays a single class
-# (only ever one kind of thing reaches the tracker, so there's nothing to confuse it
-# with). If this is ever widened to multiple classes, add a per-class partition before
-# calling tracker.update() (run one ByteTracker per class, or make cross-class pairs
-# infinitely costly in the assignment) -- not done here since it'd be unused complexity
-# for the current person-only use case.
+# matching is class-agnostic (pure IoU on boxes), so it can match a detection to an
+# existing track of a different class if their boxes overlap enough. Only safe as long
+# as this stays a single class. If ever widened to multiple classes, add a per-class
+# partition before calling tracker.update() (one ByteTracker per class, or make
+# cross-class pairs infinitely costly in the assignment).
 CLASSES_TO_DETECT = ['person']  # e.g. ['person', 'car', 'dog']
 
 # Which model variant to use: 'yolo26n' (faster) or 'yolo26s' (more accurate)
@@ -79,11 +76,8 @@ CONF_THRESHOLD = 0.5
 # association pass to recover existing tracks that a plain confidence-thresholded
 # detector would otherwise drop (occlusion, motion blur, partial visibility) -- this is
 # ByteTrack's actual innovation. Detections below this are discarded as background.
-# Unlike onnx_yolo26_pose.py, this is kept as a genuinely separate value here rather
-# than collapsed to CONF_THRESHOLD -- that collapse was a finding specific to the pose
-# model/scene (real signal and noise sitting at the same tiny absolute confidence
-# there), not a general rule. This model/scene hasn't been shown to have that problem;
-# tune independently.
+# Kept as a separate value from CONF_THRESHOLD here (unlike onnx_yolo26_pose.py, which
+# collapses the two for reasons specific to that model/scene) -- tune independently.
 LOW_CONF_THRESHOLD = 0.1
 
 # IoU threshold for NMS applied to raw per-frame detections before tracking (lower =
@@ -94,12 +88,9 @@ NMS_IOU_THRESHOLD = 0.45
 # to be kept at all -- applied alongside Confthreshold, before NMS/tracking. A tiny,
 # degenerate box is almost never a real object regardless of its confidence score.
 # Separate width/height floors, NOT one shared value applied to both axes -- an object
-# (e.g. a standing person) is rarely square, so a single threshold high enough to reject
-# small-on-both-axes noise blobs ends up demanding an unrealistically wide box, and
-# incorrectly rejects real, legitimately-large objects that are just proportionally
-# narrow on one axis (confirmed live in onnx_yolo26_pose.py: raising the old shared
-# MIN_BOX_SIZE to filter noise was also cutting real tracked people whose width sat well
-# below their height). Tune independently.
+# (e.g. a standing person) is rarely square, so a single shared threshold high enough to
+# reject small-on-both-axes noise ends up incorrectly rejecting real objects that are
+# just proportionally narrow on one axis. Tune independently.
 MIN_BOX_WIDTH = 0.02
 MIN_BOX_HEIGHT = 0.02
 
@@ -111,20 +102,16 @@ TRACKER_IOU_THRESHOLD = 0.3
 
 # Tracker: total matched frames (not necessarily consecutive -- see object_tracker.Track's
 # confirmed/hits) a brand-new track needs before it's confirmed and shown/output at all.
-# Cuts down on both overlap with existing boxes and single-frame noise "detections"
-# registering as a real object -- almost none of that noise ever gets a second real match
-# at all before track_buffer prunes it. Costs a few frames of extra latency on every
-# genuinely new object's first appearance; once confirmed a track stays confirmed through
-# brief occlusion (that's Tracklossframes'
-# job, not this one).
+# Filters out single-frame noise "detections" that rarely get a second match before
+# track_buffer prunes them. Costs a few frames of extra latency on a genuinely new
+# object's first appearance; once confirmed, a track stays confirmed through brief
+# occlusion (that's Tracklossframes' job, not this one).
 TRACKER_MIN_HITS = 3
 
 # Smoothing factor for box position/size lerp (0 = no smoothing, 1 = frozen). ByteTracker's
 # Kalman filter already smooths motion *prediction*, but a matched detection still snaps
 # the estimate fairly tightly toward the raw box each time -- this adds an extra lerp on
-# top, same role as Outputsmoothing in onnx_yolo26_pose.py (there it smooths keypoints,
-# here it smooths the box itself, since class_id/class_name are categorical and Kalman
-# already covers box motion prediction, just not this additional display-side damping).
+# top (same role Outputsmoothing plays for keypoints in onnx_yolo26_pose.py).
 OUTPUT_SMOOTHING = 0.5
 
 # Draw bounding boxes on the output image?
@@ -144,9 +131,8 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 	project) for the full box-tracking lifecycle -- Kalman motion prediction, optimal
 	(Hungarian) assignment, and ByteTrack's two-stage high/low-confidence association.
 	Box position/size is smoothed on top of the tracker's own Kalman estimate (see
-	OUTPUT_SMOOTHING/self._box_state), the same role Outputsmoothing plays for keypoints
-	in onnx_yolo26_pose.py -- class_id/class_name are categorical and just ride along in
-	the track's payload unchanged, nothing to smooth there.
+	OUTPUT_SMOOTHING/self._box_state); class_id/class_name are categorical and just ride
+	along in the track's payload unchanged, nothing to smooth there.
 	"""
 
 	def __init__(self):
@@ -585,11 +571,9 @@ class YOLO26ObjectDetectionInference(ONNXInferenceManager):
 
 
 # Create global instance -- shut down any PREVIOUS instance first (releases its
-# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script
-# reload during active development doesn't leak both -- see
-# onnx_inference_manager.shutdown_and_register()'s docstring for the full
-# mechanism this avoids (and why it's NOT TD's own store()/fetch(), which risked
-# a real crash trying to persist a live, unpicklable manager instance).
+# GPU-resident ONNX Runtime session(s) and stops its worker thread) so a script reload
+# during active development doesn't leak both. See Round 7/8 in
+# td-threaded-inference-optimization.md and shutdown_and_register()'s docstring.
 inference_manager = YOLO26ObjectDetectionInference()
 onnx_inference_manager.shutdown_and_register(parent().path, inference_manager)
 
@@ -624,18 +608,15 @@ def onGetCookLevel(scriptOp: scriptCHOP) -> CookLevel:
 		CookLevel.WHEN_USED - every frame when output is being used
 		CookLevel.ALWAYS - every frame
 
-	AUTOMATIC alone can't drive this pipeline reliably: anything reading
-	tracked_objects via a raw Python module reference (not a wire/parameter) is
-	invisible to TD's "is the output being used" dependency check, so AUTOMATIC can
-	stop cooking this even while something downstream still depends on it.
-
-	Unconditionally ALWAYS rather than switching to AUTOMATIC while paused: CookLevel is
-	only reconsidered when TD decides whether to attempt a cook at all, so once AUTOMATIC
-	settles into "not cooking" nothing prompts it to re-check later -- resuming play isn't
-	a registered dependency of this op, so it never recovers on its own (confirmed live).
-	The play/pause skip instead lives in ONNXInferenceManager.onCook() itself (checks
-	scriptOp.time.play and returns early), which keeps this op always eligible to cook
-	every frame so the very next real cook after resuming naturally picks back up.
+	AUTOMATIC alone can't drive this pipeline reliably: anything reading tracked_objects
+	via a raw Python module reference (not a wire/parameter) is invisible to TD's "is the
+	output being used" dependency check, so AUTOMATIC can stop cooking this even while
+	something downstream still depends on it. Worse, once AUTOMATIC settles into "not
+	cooking" nothing prompts it to re-check later -- resuming play isn't a registered
+	dependency of this op, so it never recovers on its own. Always returning ALWAYS keeps
+	this op eligible to cook every frame; the play/pause skip instead lives in
+	ONNXInferenceManager.onCook() itself (checks scriptOp.time.play and returns early), so
+	the very next real cook after resuming naturally picks back up.
 	"""
 
 	return CookLevel.ALWAYS
